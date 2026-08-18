@@ -1,6 +1,7 @@
 name: nightly-rebuild
-# Pulls fresh public data (Statcast current season, StatsAPI feeds, Savant leaderboards), rebuilds the derived
-# per-pitch ABS table and figures, runs the tests, and publishes data assets to a rolling GitHub Release.
+# Pulls fresh public data (Statcast current season, StatsAPI feeds, Savant leaderboards, heights), runs the tests,
+# rebuilds derived tables/figures when the analysis pipeline is wired, and publishes whatever data assets exist to a
+# rolling GitHub Release. Every pull is tolerant: one blocked source never sinks the run.
 on:
   schedule:
     - cron: "0 9 * * *"     # 09:00 UTC daily
@@ -16,32 +17,67 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
-      - name: Restore historical Statcast seasons from the data release
+
+      - name: Restore historical Statcast seasons from the data release (if present)
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           mkdir -p data/raw/statcast
           for y in 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do
-            gh release download data --pattern "statcast_$y.parquet" -D data/raw/statcast || true
+            gh release download data --pattern "statcast_$y.parquet" -D data/raw/statcast 2>/dev/null || true
           done
-        env: { GH_TOKEN: "${{ github.token }}" }
-      - name: Pull current season + feeds + leaderboards + heights
+          ls -la data/raw/statcast || true
+
+      - name: Pull Statcast current season (tolerant — Savant may refuse datacenter IPs)
+        run: python code/fetch/01_fetch_statcast.py --seasons 2026 --force || echo "::warning::Statcast pull failed on this runner"
+
+      - name: Pull StatsAPI feeds (current season)
+        run: python code/fetch/02_fetch_statsapi_feeds.py --season 2026 || echo "::warning::feeds pull failed"
+
+      - name: Pull Savant leaderboards + heights/transactions
         run: |
-          python code/fetch/01_fetch_statcast.py --seasons 2026 --force
-          python code/fetch/02_fetch_statsapi_feeds.py --season 2026
-          python code/fetch/03_fetch_savant_leaderboards.py
-          python code/fetch/04_fetch_players_and_transactions.py --years 2026
+          python code/fetch/03_fetch_savant_leaderboards.py || echo "::warning::leaderboards pull failed"
+          python code/fetch/04_fetch_players_and_transactions.py --years 2026 || echo "::warning::players/transactions pull failed"
+
       - name: Tests
         run: |
           python code/engine/abs_zone.py
           python code/engine/test_dp.py
           python code/engine/perception.py
+
+      - name: Extract challenge events from feeds (if feeds present)
+        run: |
+          if [ -d data/raw/feeds/2026 ] && [ "$(ls data/raw/feeds/2026 | wc -l)" -gt 0 ]; then
+            mkdir -p data/derived
+            python code/engine/challenges_extract.py --feeds data/raw/feeds/2026 --out data/derived/feed_2026 || echo "::warning::challenge extraction failed"
+          else
+            echo "no feeds on this runner"
+          fi
+
       - name: Build derived tables and figures
         run: python code/analysis/build_all.py || echo "analysis pipeline not yet wired"
-      - name: Publish data assets to the rolling 'data' release
+
+      - name: Publish data assets to the rolling 'data' release (only what exists)
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           gh release view data >/dev/null 2>&1 || gh release create data --title "Data (rolling)" --notes "Auto-updated public data assets"
-          gh release upload data data/raw/statcast/statcast_2026.parquet --clobber
-          tar czf feeds_2026.tgz -C data/raw feeds && gh release upload data feeds_2026.tgz --clobber
-          for f in data/derived/*.parquet; do [ -f "$f" ] && gh release upload data "$f" --clobber; done
-        env: { GH_TOKEN: "${{ github.token }}" }
+          upload() { if [ -s "$1" ]; then gh release upload data "$1" --clobber && echo "uploaded $1"; else echo "skip (missing): $1"; fi; }
+          upload data/raw/statcast/statcast_2026.parquet
+          if [ -d data/raw/feeds/2026 ] && [ "$(ls data/raw/feeds/2026 | wc -l)" -gt 0 ]; then
+            tar czf feeds_2026.tgz -C data/raw feeds && upload feeds_2026.tgz
+          fi
+          if [ -d data/raw/savant ]; then tar czf savant_leaderboards.tgz -C data/raw savant && upload savant_leaderboards.tgz; fi
+          if [ -d data/raw/players ]; then tar czf players_transactions.tgz -C data/raw players transactions 2>/dev/null && upload players_transactions.tgz; fi
+          for f in data/derived/*.parquet data/derived/*.csv; do [ -s "$f" ] && upload "$f"; done
+          echo "done"
+
+      - name: Run summary
+        run: |
+          {
+            echo "## nightly-rebuild summary"
+            echo "- statcast_2026.parquet: $([ -s data/raw/statcast/statcast_2026.parquet ] && du -h data/raw/statcast/statcast_2026.parquet | cut -f1 || echo missing)"
+            echo "- feeds 2026: $([ -d data/raw/feeds/2026 ] && ls data/raw/feeds/2026 | wc -l || echo 0) games"
+            echo "- challenge table: $([ -s data/derived/feed_2026_challenges.parquet ] && echo present || echo missing)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with: { name: figures, path: figures/, if-no-files-found: ignore }

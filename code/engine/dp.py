@@ -151,6 +151,8 @@ def solve_foresight(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
                         W = Wn
                 acc += W; n += 1
             V[h, dstart + DMAX, :] = acc / n
+        if h >= 19 and h % 2 == 1:      # a team with no token receives one at the start of an extra inning: V(·,0) = V(·,1)
+            V[h, :, 0] = V[h, :, 1]
     C = np.zeros_like(C_sum)
     for h in range(1, HMAX + 1):
         for d in range(2 * DMAX + 1):
@@ -206,6 +208,8 @@ def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True, n_iter=12, tol=1e-6,
                             W = Wn
                     acc += W; n += 1
                 V_new[h, dstart + DMAX, :] = acc / n
+            if h >= 19 and h % 2 == 1:      # extras grant on the stored value: V(·,0) = V(·,1) at the top of an extra inning
+                V_new[h, :, 0] = V_new[h, :, 1]
         C_new = np.zeros_like(C)
         for h in range(1, HMAX + 1):
             for d in range(2 * DMAX + 1):

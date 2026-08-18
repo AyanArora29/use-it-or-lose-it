@@ -112,6 +112,41 @@ def main():
                f"{int((fp['review_level']=='play').sum()):,}) vs gameData tallies {int(summ):,}; games not reconciling: "
                f"{int((g['n_challenges'] != g[['away_usedSuccessful','away_usedFailed','home_usedSuccessful','home_usedFailed']].sum(axis=1)).sum())}.")
 
+    # ---- game coverage: Statcast regular-season games absent from the feed pull ---------------------------------------
+    sc_games = sc.drop_duplicates("game_pk")[["game_pk", "game_date", "home_team", "away_team"]]
+    miss_g = sc_games[~sc_games["game_pk"].isin(fp["gamePk"])]
+    rep.append(f"- Game coverage: {len(miss_g)} Statcast regular-season games are absent from the feed pull"
+               + (f" ({', '.join(str(x) for x in miss_g['game_pk'].head(25))})" if len(miss_g) else "") +
+               f"; {int((~fp['gamePk'].isin(sc_games['game_pk'])).sum() and fp.loc[~fp['gamePk'].isin(sc_games['game_pk']), 'gamePk'].nunique())} feed games are not yet in Statcast (usually the latest date).")
+
+    # ---- independent reconciliation with Baseball Savant's ABS leaderboards (per player) ---------------------------------
+    sav_dir = os.path.join(ROOT, "data", "raw", "savant")
+    if os.path.isdir(sav_dir):
+        import unicodedata
+        def _norm(x):
+            return unicodedata.normalize("NFKD", str(x)).encode("ascii", "ignore").decode().lower().replace(".", "").replace(" jr", "").strip()
+        chal = fp[fp["challenged"] == 1]
+        for role, fn in (("batter", "abs_challenges_batter_mlb_regular_2026.csv"), ("catcher", "abs_challenges_catcher_mlb_regular_2026.csv"),
+                         ("pitcher", "abs_challenges_pitcher_mlb_regular_2026.csv")):
+            path = os.path.join(sav_dir, fn)
+            if not os.path.exists(path):
+                continue
+            try:
+                sv = pd.read_csv(path)
+                sv["key"] = sv["entity_name"].map(_norm)
+                ours = chal[chal["role"] == role].copy(); ours["key"] = ours["challenger_name"].map(_norm)
+                ours = ours.groupby("key").agg(n=("isOverturned", "size"), ov=("isOverturned", "sum")).reset_index()
+                mm = sv.merge(ours, on="key", how="outer", indicator=True); both = mm[mm["_merge"] == "both"]
+                rep.append(f"- Savant ABS leaderboard reconciliation ({role}s): {len(both)}/{len(sv)} Savant players matched by name "
+                           f"({int((mm['_merge']=='left_only').sum())} Savant-only, {int((mm['_merge']=='right_only').sum())} ours-only); "
+                           f"challenge counts identical for {(both['n_challenges']==both['n']).mean()*100:.1f}% of players, "
+                           f"Σ|difference| = {int((both['n_challenges']-both['n']).abs().sum())} of {int(both['n_challenges'].sum()):,} "
+                           f"({(both['n_challenges']-both['n']).abs().sum()/max(both['n_challenges'].sum(),1)*100:.2f}%); overturn counts identical for "
+                           f"{(both['n_overturns']==both['ov']).mean()*100:.1f}%; league totals Savant {int(sv['n_challenges'].sum()):,}/{int(sv['n_overturns'].sum()):,} vs ours "
+                           f"{int(ours['n'].sum()):,}/{int(ours['ov'].sum()):,} (snapshots may differ by a day of games).")
+            except Exception as e:  # never let an audit line sink the build
+                rep.append(f"- Savant reconciliation ({role}s) skipped: {e!r}")
+
     # ---- join to Statcast -----------------------------------------------------------------------------------------
     key = ["game_pk", "at_bat_number", "pitch_number"]
     fp = fp.rename(columns={"gamePk": "game_pk", "pitchNumber": "pitch_number"})

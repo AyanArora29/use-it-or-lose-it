@@ -64,17 +64,14 @@ def main():
     V, C = F.solve_fast(A, n_iter=40, tol=1e-7)
     r, _ = F.simulate_fast(os_, C, pm, "oracle", D=1, seed=1)
     used = r["used"].sum() / n_games; succ = r["succ"].sum() / n_games
-    rows.append(dict(rule="2 challenges retained — perfect perception (oracle)", tokens=2, retain=True, grant=True, value_pp=r["gain"].mean() * 100,
+    rows.append(dict(rule="2 challenges retained — perfect perception (oracle) = every miscall corrected: with retention a perfect challenger never loses a token, so the cap never binds",
+                     tokens=2, retain=True, grant=True, value_pp=r["gain"].mean() * 100,
                      challenges_per_game=used, corrected_per_game=succ, failed_per_game=0.0, minutes_added=used * SEC_PER_CHALLENGE / 60,
                      corrections_per_minute=succ / (used * SEC_PER_CHALLENGE / 60)))
-    wrong = os_["truth"].sum() / n_games
-    rows.append(dict(rule="every miscall corrected (full ABS; mechanical bound)", tokens=np.inf, retain=True, grant=True,
-                     value_pp=(os_["g"] * os_["truth"]).sum() / n_tg * 100, challenges_per_game=wrong, corrected_per_game=wrong, failed_per_game=0.0,
-                     minutes_added=np.nan, corrections_per_minute=np.nan))
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(DERIVED, "tier1_counterfactuals_2026.csv"), index=False)
     md = ("# Rule-design counterfactuals — 2026 streams, fitted perception (METHODS §10)\n\n"
-          f"Value = WP points per team-game from the challenge system relative to no challenges; per-game counts are for both teams; time at {SEC_PER_CHALLENGE:.0f} s per challenge.\n\n"
+          f"Value = WP points per TEAM-game from the challenge system relative to no challenges; challenge/correction counts are per GAME (both teams) — divide by 2 before forming value-per-correction; time at {SEC_PER_CHALLENGE:.0f} s per challenge (parameter).\n\n"
           + df.round(3).to_string(index=False) + f"\n\nRuntime {time.time()-t0:.0f}s.\n")
     with open(os.path.join(DERIVED, "tier1_counterfactuals_2026.md"), "w") as fh:
         fh.write(md)

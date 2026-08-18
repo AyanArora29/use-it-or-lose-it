@@ -30,3 +30,25 @@ Five referee personas (academic statistician, sports economist, front-office R&D
 - "Structural MLE is indefensible for a 16-year-old" — Tier 2 only; the abstract rests on Tier 1; the author must be able to explain the toy DP and the descriptive tables, which are the paper's spine.
 - "Drop §8 entirely" — reduced, not dropped: the RD around overturns is intuitive, needs only 2026 data, and yields one memorable chart.
 - Triple-A geometry changed year to year — handled by the rule-version table; AAA analyses only where documented.
+
+## B. Code review round (2026-08-18, after data contact) — findings and dispositions
+
+Independent adversarial review of the analysis code (wp_count.py, wp_model.py, challenges_extract.py, build_opps_2026.py, perception_fit_2026.py, dp.py, dp_fast.py, tier1_dp_2026.py, decompose_2026.py, counterfactuals_2026.py) against METHODS §2–§7.
+
+| # | severity | finding | disposition |
+|---|---|---|---|
+| 1 | high | WP cube did not end the game when the top of the 9th+ ended with the home team ahead; game-ending strike-three cell mispriced (65% of such opportunities clipped to g = 0) | fixed in wp_count.build_cube and wp_model.wp_after_pitch; capture 0.815 → 0.817 |
+| 2 | high | capture ratio is a mechanical function of σ; σ from the pooled probit is an upper bound on perception noise | stated as conditional; player-fixed-effects σ added to robustness (capture 0.80); paper wording changed |
+| 3 | medium | "within-team σ" replaced cell effects instead of adding them (reported σ_within > σ_pooled) | replaced by two-way probit (cell + team; cell + player) |
+| 4 | medium | extras grant not applied to the stored V (MTV1 at the top of the 10th reported as 0.88 pp instead of 0) | fixed in dp.py and dp_fast.py |
+| 5 | medium | V(2) at first pitch (2.49) and simulated optimum (2.59) are two numbers for one estimand | headline = simulated optimum on actual streams; V(2) reported as ex-ante state value with the reason |
+| 6 | medium | unsmoothed count-conditional transitions: walk cells differed by strike count (up to 3.9 pp) | terminal counts pooled; thin cells shrunk toward base-out transitions |
+| 7 | medium | g clipped at 0 for 2.7% of opportunities; 256 real challenges on g = 0 | fixed cube reduces to 2.2% / 148; clip justified (first-base-open 3-0 states); dump index excludes g = 0 |
+| 8 | medium | in-sample fitting vs the pre-registered leakage-free split | split added to robustness (fit ≤ Jul 31, evaluate August: capture 0.83) |
+| 9 | low | per-band "share of gap" not a decomposition when negative | levels reported; wording fixed |
+| 10 | low | oracle and "unlimited tokens" rows identical | merged with the explicit statement (with retention a perfect challenger never loses a token) |
+| 11 | low | bootstrap pseudo-game id collisions; card cells used per-side terciles | fixed (unique ids; pooled terciles as in build_card) |
+| 12 | low | half-innings beyond the 12th collapse into one state (33 opportunities) | documented |
+| 13 | low | base/score state from Statcast pre-pitch fields | documented (Statcast fields are pre-pitch; outs cross-checked 100%) |
+| 14 | low | numerator scored by ABS verdict, denominator by zone truth | numerator now scored by truth; verdict-scored value reported alongside |
+| 15 | low | Savant per-player reconciliation exact for 70–89% of players (snapshots a day apart; a few counts exceed Savant's) | reported as is; attribution to be re-checked once both snapshots align |

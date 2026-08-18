@@ -86,12 +86,18 @@ def schedule(season, sport, game_types, start=None, end=None):
                     (((g.get("teams") or {}).get("home") or {}).get("team") or {}).get("name"),
                 ))
         cur = nxt + dt.timedelta(days=1)
-    # de-dup (doubleheaders are distinct gamePks; schedule pages can overlap by a day)
-    seen, out = set(), []
+    # de-dup (doubleheaders are distinct gamePks; schedule pages can overlap by a day). A postponed game appears twice —
+    # under its original date with status "Postponed" and under the make-up date with "Final" — so keep the entry with a
+    # completed status when there is one (keeping the first occurrence silently dropped ~20 make-up games in 2026).
+    def _done(st):
+        st = st or ""
+        return st.startswith("Final") or st in ("Completed Early", "Game Over")
+    best = {}
     for g in games:
-        if g[0] not in seen:
-            seen.add(g[0]); out.append(g)
-    return out
+        cur = best.get(g[0])
+        if cur is None or (_done(g[3]) and not _done(cur[3])):
+            best[g[0]] = g
+    return list(best.values())
 
 
 def summarize_feed(js):

@@ -26,7 +26,8 @@ def main():
     op["obs_used"] = op["challenged"]; op["opt_used"] = op["prop_optimal"]
     op["obs_succ"] = op["challenged"] * op["overturned"]; op["opt_succ"] = op["prop_optimal"] * op["truth"]
     op["oracle_gain"] = op["g"] * op["truth"]
-    rep = ["# Shortfall decomposition — 2026 (observed vs information-constrained optimum)", ""]
+    rep = ["# Shortfall decomposition — 2026 (observed vs information-constrained optimum)", "",
+           "Levels per team-game. The optimum is one global policy evaluated on the same streams; a negative per-band gap means the optimum spends fewer tokens there because it spent them earlier, not that teams out-perform it there.", ""]
     rep.append(f"- Per team-game: observed {op['obs_gain'].sum()/n_tg*100:.3f} pp; optimum {op['opt_gain'].sum()/n_tg*100:.3f} pp; oracle {op['oracle_gain'].sum()/n_tg*100:.3f} pp; "
                f"gap {(op['opt_gain'].sum()-op['obs_gain'].sum())/n_tg*100:.3f} pp ({(op['opt_gain'].sum()-op['obs_gain'].sum())/n_tg*162:.2f} wins/162).")
     rows = []
@@ -37,7 +38,7 @@ def main():
             t[c] = t[c] / n_tg
         for c in ["obs_gain", "opt_gain", "oracle_gain"]:
             t[c] = t[c] / n_tg * 100
-        t["gap_pp"] = t["opt_gain"] - t["obs_gain"]; t["share_of_gap"] = t["gap_pp"] / t["gap_pp"].sum()
+        t["gap_pp"] = t["opt_gain"] - t["obs_gain"]   # levels; the optimum is a global policy, so per-band gaps can be negative (it spends tokens earlier by design)
         t["obs_succ_rate"] = t["obs_succ"] / t["obs_used"]; t["opt_succ_rate"] = t["opt_succ"] / t["opt_used"]
         t.insert(0, "by", name)
         rows.append(t)

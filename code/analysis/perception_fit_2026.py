@@ -84,6 +84,23 @@ def fit_probit(x, y, cell_idx, n_cells, hurdle=False):
     return dict(sigma=1 / a, tau=-b / a, pi=pi, nll=res.fun, converged=bool(res.success), n=int(len(x)), k=len(res.x))
 
 
+def fit_twoway(x, y, c1, n1, c2, n2):
+    """Probit P = Φ(a·x + b[c1] + d[c2]); returns (sigma = 1/a, b, d, nll, converged)."""
+    def unpack(th):
+        return np.exp(th[0]), th[1:1 + n1], th[1 + n1:1 + n1 + n2]
+    def nll(th):
+        a, b, d = unpack(th); z = a * x + b[c1] + d[c2]; P = np.clip(norm.cdf(z), 1e-12, 1 - 1e-12)
+        return -(y * np.log(P) + (1 - y) * np.log(1 - P)).sum()
+    def grad(th):
+        a, b, d = unpack(th); z = a * x + b[c1] + d[c2]; Phi = norm.cdf(z); phi = norm.pdf(z); P = np.clip(Phi, 1e-12, 1 - 1e-12)
+        gz = (y / P - (1 - y) / (1 - P)) * phi
+        return -np.concatenate([[(gz * x).sum() * a], np.bincount(c1, weights=gz, minlength=n1), np.bincount(c2, weights=gz, minlength=n2)])
+    th0 = np.concatenate([[np.log(0.4)], np.full(n1, -1.5), np.zeros(n2)])
+    r = minimize(nll, th0, jac=grad, method="L-BFGS-B", options={"maxiter": 3000})
+    a, b, d = unpack(r.x)
+    return 1 / a, b, d, r.fun, bool(r.success)
+
+
 def posterior_pm(x_all, sigma, grid=np.linspace(-12, 12, 481)):
     """p(m) = P(x > 0 | m) under prior = empirical distribution of x (all eligible opportunities of the side) and m = x + ε."""
     hist_edges = np.arange(-30, 30.05, 0.1)
@@ -101,6 +118,10 @@ def main():
     args = ap.parse_args()
     o = pd.read_parquet(args.opps)
     o = o[(o["pos_pitcher"] == 0)].copy()
+    sc_path = os.path.join(ROOT, "data", "raw", "statcast", "statcast_2026.parquet")
+    if os.path.exists(sc_path):
+        sc = pd.read_parquet(sc_path, columns=["game_pk", "at_bat_number", "pitch_number", "fielder_2"])
+        o = o.merge(sc, on=["game_pk", "at_bat_number", "pitch_number"], how="left")
     o, lev_q = add_cells(o)
     rep = ["# Perception fits — 2026 (METHODS §5)", ""]
     rep.append(f"- Sample: {len(o):,} eligible called pitches (position players pitching excluded); challenges {int(o['challenged'].sum()):,}.")
@@ -143,20 +164,28 @@ def main():
         x = s["x_margin"].values.astype(float); y = s["challenged"].values.astype(float)
         f0 = fit_probit(x, y, ci, len(cells), hurdle=False)
         f1 = fit_probit(x, y, ci, len(cells), hurdle=True)
-        # heterogeneity: thresholds by challenging TEAM (fixed effects) — within-team slope
+        # heterogeneity: two-way probits Φ(a·x + b_cell + c_group) with group = challenging team, and group = player
+        # (players with >= 5 challenges; the rest pooled). The within-group slope is the perception noise net of group thresholds.
         team = np.where(s["team_home"] == 1, s["home_team"], s["away_team"])
         teams = sorted(set(team)); ti = pd.Series(team).map({t: i for i, t in enumerate(teams)}).values.astype(int)
-        f2 = fit_probit(x, y, ti, len(teams), hurdle=False)
-        # cell × team is too sparse; instead cell thresholds + team offsets: approximate by two-way (cell + team) probit
-        # -> implemented as alternating? keep simple: report σ pooled vs σ within-team.
+        sig_team, _, d_team, nll_team, _ = fit_twoway(x, y, ci, len(cells), ti, len(teams))
+        pid = s["batter"].values if side == "bat" else s["fielder_2"].values if "fielder_2" in s else None
+        if pid is not None:
+            pid = pd.Series(pid).fillna(-9).values
+            nch = pd.Series(y).groupby(pid).sum(); keep = set(nch[nch >= 5].index)
+            pg = np.array([p_ if p_ in keep else -1 for p_ in pid]); pl = sorted(set(pg)); pi_ = pd.Series(pg).map({p_: i for i, p_ in enumerate(pl)}).values.astype(int)
+            sig_pl, _, d_pl, nll_pl, _ = fit_twoway(x, y, ci, len(cells), pi_, len(pl))
+        else:
+            sig_pl, d_pl, nll_pl, pl = float("nan"), np.zeros(1), float("nan"), []
         lr = 2 * (f0["nll"] - f1["nll"])
         fits["sides"][side] = dict(cells=cells, pooled=dict(sigma=float(f0["sigma"]), tau={c: float(t) for c, t in zip(cells, f0["tau"])}, nll=float(f0["nll"]), n=f0["n"]),
                                    hurdle=dict(sigma=float(f1["sigma"]), pi=float(f1["pi"]), tau={c: float(t) for c, t in zip(cells, f1["tau"])}, nll=float(f1["nll"])),
-                                   team_fe=dict(sigma=float(f2["sigma"]), tau={t: float(v) for t, v in zip(teams, f2["tau"])}, nll=float(f2["nll"])),
+                                   team_fe=dict(sigma=float(sig_team), sd_team_effect_in=float(np.std(d_team) * sig_team), nll=float(nll_team)),
+                                   player_fe=dict(sigma=float(sig_pl), n_players=int(max(len(pl) - 1, 0)), sd_player_effect_in=float(np.std(d_pl[1:]) * sig_pl) if len(pl) > 1 else float("nan"), nll=float(nll_pl)),
                                    lr_hurdle_vs_pooled=float(lr))
         rep.append(f"- **{side}**: pooled probit σ = {f0['sigma']:.2f} in (n={f0['n']:,}); hurdle probit σ = {f1['sigma']:.2f} in, π = {f1['pi']:.3f} "
-                   f"(LR vs pooled = {lr:.1f} on 1 df); team-FE probit σ_within-team = {f2['sigma']:.2f} in "
-                   f"(team thresholds range {np.min(f2['tau']):.2f}–{np.max(f2['tau']):.2f} in).")
+                   f"(LR vs pooled = {lr:.1f} on 1 df); two-way probit with cell + team thresholds: σ = {sig_team:.2f} in (SD of team effects {np.std(d_team)*sig_team:.2f} in); "
+                   f"cell + player thresholds: σ = {sig_pl:.2f} in ({max(len(pl)-1,0)} players with ≥5 challenges; SD of player effects {np.std(d_pl[1:])*sig_pl if len(pl)>1 else float('nan'):.2f} in).")
         tau = pd.Series(f0["tau"], index=cells)
         by = {}
         for part, pos in (("inning band", 0), ("tokens", 1), ("leverage", 2), ("count class", 3)):

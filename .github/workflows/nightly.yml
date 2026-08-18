@@ -18,12 +18,20 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
 
-      - name: Restore historical Statcast seasons from the data release (if present)
+      - name: Restore historical Statcast seasons from the data release; pull + publish any that are missing (one-time)
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           mkdir -p data/raw/statcast
+          gh release view data >/dev/null 2>&1 || gh release create data --title "Data (rolling)" --notes "Auto-updated public data assets"
           for y in 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do
             gh release download data --pattern "statcast_$y.parquet" -D data/raw/statcast 2>/dev/null || true
+          done
+          # seasons needed by the umpire-response / framing analyses (§8–§9): pull once if absent, then they live on the release
+          for y in 2023 2024 2025; do
+            if [ ! -s "data/raw/statcast/statcast_$y.parquet" ]; then
+              python code/fetch/01_fetch_statcast.py --seasons $y --force && gh release upload data "data/raw/statcast/statcast_$y.parquet" --clobber \
+                || echo "::warning::Statcast $y pull/upload failed on this runner"
+            fi
           done
           ls -la data/raw/statcast || true
 

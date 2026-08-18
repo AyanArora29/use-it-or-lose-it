@@ -147,11 +147,16 @@ def simulate(op: pd.DataFrame, C, pm, policy, D=200, seed=1, card_fn=None, fit=N
     return res, prop
 
 
-def realized_observed(op: pd.DataFrame):
-    r = op.groupby(["game_id", "team_home"]).agg(gain=("g", lambda s: 0.0)).reset_index()
-    ch = op[op["challenged"] == 1]
-    agg = ch.groupby(["game_id", "team_home"]).apply(lambda s: pd.Series({"gain": (s["g"] * s["overturned"]).sum(), "used": len(s), "succ": s["overturned"].sum()})).reset_index()
-    r = r.drop(columns=["gain"]).merge(agg, on=["game_id", "team_home"], how="left").fillna({"gain": 0.0, "used": 0, "succ": 0})
+def realized_observed(op: pd.DataFrame, outcome="truth"):
+    """Realized value of the actual challenges per team-game. outcome='truth' scores a challenge by our zone truth (the same
+    outcome the simulated policies use, so numerator and denominator of the capture ratio share one zone); 'overturned' uses
+    the ABS verdict as recorded (99.7% identical)."""
+    r = op.groupby(["game_id", "team_home"]).size().rename("n").reset_index()
+    ch = op[op["challenged"] == 1].copy()
+    ch["succ_"] = ch[outcome].astype(float)
+    ch["gain_"] = ch["g"] * ch["succ_"]
+    agg = ch.groupby(["game_id", "team_home"]).agg(gain=("gain_", "sum"), used=("succ_", "size"), succ=("succ_", "sum")).reset_index()
+    r = r.drop(columns=["n"]).merge(agg, on=["game_id", "team_home"], how="left").fillna({"gain": 0.0, "used": 0, "succ": 0})
     return r
 
 
@@ -192,10 +197,10 @@ def main():
         f"inn {(h+1)//2}: V(2)={V[h, DMAX, 2]*100:.2f}, MTV2={M[h, DMAX, 1]*100:.2f}, MTV1={M[h, DMAX, 0]*100:.2f}" for h in (1, 5, 9, 13, 15, 17)))
     rep.append("- MTV of the 2nd token at the start of inning 1 / 5 / 9 by score (team perspective, pp): " + "; ".join(
         f"{d:+d}: {M[1, d+DMAX, 1]*100:.2f}/{M[9, d+DMAX, 1]*100:.2f}/{M[17, d+DMAX, 1]*100:.2f}" for d in (-4, -2, -1, 0, 1, 2, 4)))
-    # season-level: V(2) at game start = expected WP gain from optimal use of two tokens vs none
+    # DP ex-ante state value at first pitch (tie): V(2). The headline value of the two challenges is the simulated optimum on
+    # the actual streams (reported below); V(2) is a few % lower because the DP aggregates continuation values by state.
     v0 = V[1, DMAX, 2]
-    rep.append(f"- **Value of the two challenges at first pitch (tie game), optimal information-constrained use: {v0*100:.2f} WP points per team-game "
-               f"≈ {v0*162:.2f} wins per 162 games** (a policy of never challenging = 0).")
+    rep.append(f"- DP ex-ante value of holding two challenges at first pitch (tie game): V(2) = {v0*100:.2f} WP points; MTV1 = {M[1, DMAX, 0]*100:.2f}, MTV2 = {M[1, DMAX, 1]*100:.2f}.")
 
     # ---- card ---------------------------------------------------------------------------------------------------
     op1 = ops[0].copy(); op1["game_id"] = op1["game_id"] // 10
@@ -211,9 +216,12 @@ def main():
     op = op1
     results = {}
     pol_rows = []
-    obs = realized_observed(op)
+    obs = realized_observed(op, "truth")
+    obs_v = realized_observed(op, "overturned")
     results["observed_realized"] = dict(gain=obs["gain"].mean(), used=obs["used"].mean(), succ=obs["succ"].mean(),
                                         succ_rate=obs["succ"].sum() / max(obs["used"].sum(), 1))
+    results["observed_realized_abs_verdict"] = dict(gain=obs_v["gain"].mean(), used=obs_v["used"].mean(), succ=obs_v["succ"].mean(),
+                                                    succ_rate=obs_v["succ"].sum() / max(obs_v["used"].sum(), 1))
     for pol in ["oracle", "optimal", "card", "naive50", "late50", "observed_model", "never"]:
         t1 = time.time()
         r, prop = simulate(op, C, pm, pol, D=args.draws if pol not in ("oracle", "never") else 1, seed=7, card_fn=look, fit=fit)
@@ -233,10 +241,14 @@ def main():
     cap = results["observed_realized"]["gain"] / results["optimal"]["gain"]
     cap_model = results["observed_model"]["gain"] / results["optimal"]["gain"]
     perc_cost = results["optimal"]["gain"] / results["oracle"]["gain"]
+    rep.append(f"- **Value of the two challenges (information-constrained optimum on the actual 2026 streams): {results['optimal']['gain']*100:.2f} WP points per team-game "
+               f"≈ {results['optimal']['gain']*162:.2f} wins per 162 games; teams realized {results['observed_realized']['gain']*100:.2f} pp ≈ {results['observed_realized']['gain']*162:.2f} wins "
+               f"(scored by the ABS verdict as recorded: {results['observed_realized_abs_verdict']['gain']*100:.2f} pp).**")
     rep.append(f"- **Capture ratio (observed realized ÷ information-constrained optimum): {cap:.3f}**; model-based observed ÷ optimum: {cap_model:.3f}; "
-               f"information-constrained optimum ÷ oracle: {perc_cost:.3f} (the perception cost). Observed realized gain "
-               f"{results['observed_realized']['gain']*100:.3f} pp/team-game vs optimum {results['optimal']['gain']*100:.3f} pp — a gap of "
-               f"{(results['optimal']['gain']-results['observed_realized']['gain'])*16200/100:.2f} wins per 162 games.")
+               f"information-constrained optimum ÷ oracle: {perc_cost:.3f} (the perception cost). Gap = "
+               f"{(results['optimal']['gain']-results['observed_realized']['gain'])*100:.3f} pp per team-game = {(results['optimal']['gain']-results['observed_realized']['gain'])*162:.2f} wins per 162 games. "
+               f"The capture ratio is conditional on the fitted perception noise σ (all decision variance not explained by the state cells is treated as perceptual); "
+               f"see tier1_robustness_2026 for σ from player fixed effects and other variants.")
     # game-clustered bootstrap for the capture ratio (policy simulations fixed)
     ropt = pd.read_parquet(os.path.join(DERIVED, "tier1_sim_optimal.parquet"))
     mm = obs.merge(ropt[["game_id", "team_home", "gain"]], on=["game_id", "team_home"], suffixes=("_obs", "_opt"))
@@ -289,7 +301,7 @@ def main():
         m_exp = row["x"] + sig * norm.pdf(a) / max(1 - norm.cdf(a), 1e-12)
         return p_of_m(pm, side, m_exp)
     ch["p_hat"] = ch.apply(exp_p_given_challenge, axis=1)
-    ch["dump"] = np.maximum(0, (ch["pstar_obs"] - ch["p_hat"]) * (ch["g"] + ch["mtv_obs"]))
+    ch["dump"] = np.where(ch["g"] > 0, np.maximum(0, (ch["pstar_obs"] - ch["p_hat"]) * (ch["g"] + ch["mtv_obs"])), 0.0)   # g = 0: no break-even defined
     di = ch[ch["inn9"]].groupby("state")["dump"].agg(["size", "sum", "mean"])
     n_tg = o["game_pk"].nunique() * 2
     rep.append("- WP-weighted dump index (9th+ challenges; Σ max(0,(p*−p̂)(g+MTV)) per team-game, pp): " + "; ".join(

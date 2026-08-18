@@ -162,8 +162,12 @@ class WPCube:
             n_inning = np.where(inning_over, np.where(bat_home == 1, inning + 1, inning), inning)
             n_bat_home = np.where(inning_over, 1 - bat_home, bat_home)
             n_outs = np.where(inning_over, 0, new_outs)
-            n_bases = np.where(inning_over, 0, bases_idx)
+            n_bases = np.where(inning_over, np.where(n_inning >= 10, 2, 0), bases_idx)
             wp_k = self.wp_home(n_inning, n_bat_home, n_outs, n_bases, sd, 0, 0)
+            # game over: top of the 9th+ ends with the home team ahead, or the bottom ends with either team ahead
+            sd_a = np.asarray(sd)
+            wp_k = np.where(inning_over & (np.asarray(inning) >= 9) & (sd_a > 0), 1.0, wp_k)
+            wp_k = np.where(inning_over & (bat_home == 1) & (np.asarray(inning) >= 9) & (sd_a < 0), 0.0, wp_k)
             wp_strike = self.wp_home(inning, bat_home, outs, bases_idx, sd, balls, np.minimum(strikes + 1, 2))
             return np.where(k, wp_k, wp_strike)
 

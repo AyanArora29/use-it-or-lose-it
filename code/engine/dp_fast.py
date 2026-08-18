@@ -108,6 +108,8 @@ def _solve_kernel(inst_h, inst_dstart, inst_dend, inst_last, inst_lo, inst_hi, g
                 else:
                     for t in range(ntok):
                         V_new[h, d, t] = V_new[h + 1, d, t]
+                if grant == 1 and h >= 19 and (h % 2 == 1):
+                    V_new[h, d, 0] = V_new[h, d, 1]      # extras grant on the stored value
         C_new = np.zeros((HMAX + 2, ND, 3, ntok))
         delta = 0.0
         for h in range(1, HMAX + 1):

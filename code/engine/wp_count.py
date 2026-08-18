@@ -92,15 +92,39 @@ def count_paths(df, pa):
     return paths
 
 
-def transition_table(seasons=range(2021, 2026)):
+def transition_table(seasons=range(2021, 2026), shrink_k=200):
+    """P(T | balls, strikes, outs, bases). Terminal counts are pooled: a walk is a walk whatever the strike count, a
+    strikeout is a strikeout whatever the ball count (their transitions do not depend on the other coordinate). Non-terminal
+    cells are shrunk toward the count-free transition distribution of the same base-out state with shrink_k pseudo-PAs, so
+    thin cells (e.g. 3-0 with the bases loaded) do not inject noise into the count values."""
     df, pa = pa_transitions(seasons)
     paths = count_paths(df, pa)
     m = paths.merge(pa[["season", "game_id", "pa_idx", "outs", "bases_idx", "d_outs", "end_bases", "runs", "inning_over"]],
                     on=["season", "game_id", "pa_idx"], how="inner")
     m["T"] = m["d_outs"] * 100 + m["end_bases"] * 10 + m["runs"]     # transition key
-    tab = m.groupby(["balls", "strikes", "outs", "bases_idx", "T"]).size().rename("n").reset_index()
-    tab["p"] = tab["n"] / tab.groupby(["balls", "strikes", "outs", "bases_idx"])["n"].transform("sum")
+    # pool terminal counts
+    m.loc[m["balls"] == 4, "strikes"] = -1        # walk: pooled over strikes
+    m.loc[m["strikes"] == 3, "balls"] = -1        # strikeout: pooled over balls
+    cnt = m.groupby(["balls", "strikes", "outs", "bases_idx", "T"]).size().rename("n").reset_index()
+    tot = cnt.groupby(["balls", "strikes", "outs", "bases_idx"])["n"].transform("sum")
+    # count-free base distribution per (outs, bases): use PA-level transitions once (from the (0,0) count rows = every PA)
+    base = m[(m["balls"] == 0) & (m["strikes"] == 0)].groupby(["outs", "bases_idx", "T"]).size().rename("nb").reset_index()
+    base["pb"] = base["nb"] / base.groupby(["outs", "bases_idx"])["nb"].transform("sum")
+    # complete every cell over the union of transitions seen in its base state, then shrink
+    keys = cnt[["balls", "strikes", "outs", "bases_idx"]].drop_duplicates()
+    full = keys.merge(base[["outs", "bases_idx", "T", "pb"]], on=["outs", "bases_idx"], how="left")
+    full = full.merge(cnt, on=["balls", "strikes", "outs", "bases_idx", "T"], how="left").fillna({"n": 0})
+    ncell = full.groupby(["balls", "strikes", "outs", "bases_idx"])["n"].transform("sum")
+    terminal = (full["balls"] == 4) | (full["strikes"] == 3)
+    k = np.where(terminal, 0.0, shrink_k)          # no shrinkage for pooled terminal cells (deterministic-ish, large N)
+    full["p"] = (full["n"] + k * full["pb"]) / (ncell + k)
+    full["p"] = full["p"] / full.groupby(["balls", "strikes", "outs", "bases_idx"])["p"].transform("sum")
+    tab = full[full["p"] > 0].copy()
     tab["d_outs"] = tab["T"] // 100; tab["end_bases"] = (tab["T"] // 10) % 10; tab["runs"] = tab["T"] % 10
+    # expand pooled terminal cells back to the grid: (4, -1) -> (4, 0..2); (-1, 3) -> (0..3, 3)
+    walk = tab[tab["balls"] == 4]; k_ = tab[tab["strikes"] == 3]; rest = tab[(tab["balls"] != 4) & (tab["strikes"] != 3)]
+    parts = [rest] + [walk.assign(strikes=s_) for s_ in range(3)] + [k_.assign(balls=b_) for b_ in range(4)]
+    tab = pd.concat(parts, ignore_index=True)
     return tab, pa
 
 
@@ -180,8 +204,9 @@ def build_cube(tab, base_model, season=2025):
             # if top of inning>=9 ended (or later) and home leads -> home wins without batting (WP_base handles: bh2=1 with sd>0 at inn>=9 → ~1)
             if over:
                 bottom_ended = Ss["bat_home"].values == 1
-                home_won = bottom_ended & (Ss["inning"].values >= 9) & (sd2 > 0)
-                away_won = bottom_ended & (Ss["inning"].values >= 9) & (sd2 < 0)
+                top_ended = Ss["bat_home"].values == 0
+                home_won = ((bottom_ended | top_ended) & (Ss["inning"].values >= 9) & (sd2 > 0))   # home ahead after the top of the 9th+ (no bottom) or after the bottom
+                away_won = bottom_ended & (Ss["inning"].values >= 9) & (sd2 < 0)                  # away ahead after the bottom of the 9th+
                 wp = np.where(home_won, 1.0, np.where(away_won, 0.0, wp))
             else:
                 # walk-off during the bottom of 9th+ (home takes the lead) -> game over

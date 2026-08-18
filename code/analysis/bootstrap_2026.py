@@ -46,15 +46,18 @@ def fit_perception(o, cells_by_side):
     return pm, tau_all, sig_obs
 
 
-def card_from(op_sorted, C, lev_q_side):
-    """Break-even p* per (inn_band, lev, cnt) with two tokens and one token (medians)."""
+def card_from(op_sorted, C, gq):
+    """Break-even p* per (inn_band, lev, cnt) with two tokens and one token (medians); lev = pooled g terciles gq=(q1,q2),
+    the same definition as dp.build_card (held at the full-sample cut points across replicates)."""
     o = op_sorted
     hc = o["h_c"].values; d = o["d_pitch"].values; outs = o["outs"].values
     m2 = C[hc, d, outs, 2] - C[hc, d, outs, 1]; m1 = C[hc, d, outs, 1] - C[hc, d, outs, 0]
     g = o["g"].values
-    p2 = np.where(g > 0, m2 / (g + m2), 1.0); p1 = np.where(g > 0, m1 / (g + m1), 1.0)
+    ok = g > 0
+    p2 = np.where(ok, m2 / (g + m2), np.nan); p1 = np.where(ok, m1 / (g + m1), np.nan)
+    lev = np.where(g < gq[0], "low", np.where(g < gq[1], "mid", "high"))
     df = pd.DataFrame({"inn_band": INN_BAND(o["inning"].values), "cnt": CNT_CLASS(o["balls"].values, o["strikes"].values),
-                       "lev": o["lev"].values, "p2": p2, "p1": p1})
+                       "lev": lev, "p2": p2, "p1": p1})
     return df.groupby(["inn_band", "lev", "cnt"])[["p2", "p1"]].median()
 
 
@@ -74,6 +77,7 @@ def main():
     o, _ = add_cells(o, lev_q)
     cells_by_side = {s: fit["sides"][s]["cells"] for s in ("bat", "fld")}
     hi_all = half_inning_paths(os.path.join(ROOT, "data", "raw", "statcast", "statcast_2026.parquet"), set(o["game_pk"]))
+    gq = tuple(o["g"].quantile([1 / 3, 2 / 3]).values)      # pooled leverage terciles for the card (fixed across replicates)
     games = np.array(sorted(o["game_pk"].unique()))
     o_by_game = {g: v for g, v in o.groupby("game_pk", sort=False)}
     hi_by_game = {g: v for g, v in hi_all.groupby("game_id", sort=False)}
@@ -90,7 +94,7 @@ def main():
         parts = []; hparts = []
         for j, gk in enumerate(sample):
             og = o_by_game[gk]; hg = hi_by_game[gk]
-            gid = int(gk) * 1000 + j % 1000 if b > 0 else int(gk)
+            gid = 10_000_000 + j if b > 0 else int(gk)      # unique per draw position (a game drawn twice becomes two pseudo-games)
             parts.append(og.assign(game_pk=gid)); hparts.append(hg.assign(game_id=gid))
         ob = pd.concat(parts, ignore_index=True); hb = pd.concat(hparts, ignore_index=True)
         pm, tau_all, sig_obs = fit_perception(ob, cells_by_side)
@@ -112,7 +116,7 @@ def main():
         r_orc, _ = F.simulate_fast(os_, C, pm, "oracle", D=1, seed=1)
         obs_gain = (os_["g"] * os_["challenged"] * os_["overturned"]).sum() / (os_.groupby(["game_id", "team_home"]).ngroups)
         opt_gain = r_opt["gain"].mean(); orc_gain = r_orc["gain"].mean()
-        card = card_from(os_, C, lev_q)
+        card = card_from(os_, C, gq)
         row = dict(b=b, n_games=len(sample), sigma_bat=pm["bat"][2], sigma_fld=pm["fld"][2],
                    V2_start=V[1, DMAX, 2], MTV2_inn1=V[1, DMAX, 2] - V[1, DMAX, 1], MTV1_inn1=V[1, DMAX, 1] - V[1, DMAX, 0],
                    MTV2_inn5=V[9, DMAX, 2] - V[9, DMAX, 1], MTV2_inn9=V[17, DMAX, 2] - V[17, DMAX, 1],

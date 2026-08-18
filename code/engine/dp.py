@@ -102,11 +102,7 @@ def team_bucket(sd_home, team_home):
     return np.clip(d, -DMAX, DMAX).astype(int)
 
 
-def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
-    """Return V[h, d+DMAX, t] for h in 1..HMAX+1 (index HMAX+1 = terminal zeros)."""
-    V = np.zeros((HMAX + 2, 2 * DMAX + 1, TOK))
-    C_sum = np.zeros((HMAX + 2, 2 * DMAX + 1, 3, TOK)); C_n = np.zeros((HMAX + 2, 2 * DMAX + 1, 3))
-    # index half-innings by (season, game_id, team_home, h) for both teams
+def _index_streams(op: pd.DataFrame, hi: pd.DataFrame):
     hi_rows = []
     for th in (0, 1):
         t = hi.copy(); t["team_home"] = th
@@ -114,9 +110,20 @@ def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
         hi_rows.append(t)
     H = pd.concat(hi_rows, ignore_index=True)
     H["h_c"] = np.minimum(H["h"], HMAX)
+    H["is_last"] = (H["h"] == H.groupby(["season", "game_id"])["h"].transform("max")).astype(int)   # game over after this half-inning
     op = op.copy(); op["h_c"] = np.minimum(op["h"], HMAX)
-    op_groups = {k: v for k, v in op.groupby(["season", "game_id", "team_home", "h_c"], sort=False)}
-    t0 = time.time()
+    op["d_pitch"] = team_bucket(op["score_diff_home"].values, op["team_home"].values)
+    op_groups = {k: (v["g"].values, v["p"].values, v["outs"].values.astype(int), v["d_pitch"].values.astype(int))
+                 for k, v in op.groupby(["season", "game_id", "team_home", "h_c"], sort=False)}
+    return H, op_groups
+
+
+def solve_foresight(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
+    """Sample-path backward induction (v0.1): the backward max over each instance's OWN remaining stream — an in-sample
+    optimum with perfect foresight of the upcoming opportunities within the half-inning. Upward-biased; kept for reference."""
+    V = np.zeros((HMAX + 2, 2 * DMAX + 1, TOK))
+    C_sum = np.zeros((HMAX + 2, 2 * DMAX + 1, 3, TOK)); C_n = np.zeros((HMAX + 2, 2 * DMAX + 1, 3))
+    H, op_groups = _index_streams(op, hi)
     for h in range(HMAX, 0, -1):
         Hh = H[H["h_c"] == h]
         for dstart in range(-DMAX, DMAX + 1):
@@ -127,19 +134,16 @@ def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
             acc = np.zeros(TOK); n = 0
             for r in sub.itertuples(index=False):
                 key = (r.season, r.game_id, r.team_home, h)
-                # continuation at start of next half-inning, with extra-innings token grant
-                cont = V[h + 1, r.d_end + DMAX, :].copy()
+                cont = np.zeros(TOK) if r.is_last else V[h + 1, r.d_end + DMAX, :].copy()
                 nxt = h + 1
-                if nxt >= 19 and nxt % 2 == 1:      # start of an extra inning (top): grant 1 token if 0
+                if not r.is_last and nxt >= 19 and nxt % 2 == 1:
                     cont[0] = cont[1]
                 W = cont
                 if key in op_groups:
-                    grp = op_groups[key]
-                    gs = grp["g"].values; ps = grp["p"].values; os_ = grp["outs"].values
+                    gs, ps, os_, ds = op_groups[key]
                     for i in range(len(gs) - 1, -1, -1):
                         g, p = gs[i], ps[i]
-                        # W is the continuation AFTER opportunity i -> record it for decision-time MTV at (h, d, outs)
-                        C_sum[h, dstart + DMAX, os_[i], :] += W; C_n[h, dstart + DMAX, os_[i]] += 1
+                        C_sum[h, ds[i] + DMAX, os_[i], :] += W; C_n[h, ds[i] + DMAX, os_[i]] += 1
                         Wn = W.copy()
                         for t in range(1, TOK):
                             chal = p * (g + W[t]) + (1 - p) * W[t - 1]
@@ -147,14 +151,72 @@ def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True):
                         W = Wn
                 acc += W; n += 1
             V[h, dstart + DMAX, :] = acc / n
-        if verbose and h % 4 == 0:
-            print(f"  solved down to h={h} ({time.time()-t0:.0f}s)")
-    # continuation table; fall back to start-of-next-half-inning V where a cell is empty
     C = np.zeros_like(C_sum)
     for h in range(1, HMAX + 1):
         for d in range(2 * DMAX + 1):
             for o in range(3):
                 C[h, d, o, :] = C_sum[h, d, o, :] / C_n[h, d, o] if C_n[h, d, o] > 0 else V[h + 1, d, :]
+    return V, C
+
+
+def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True, n_iter=12, tol=1e-6, C0=None):
+    """State-based value function by policy iteration on the empirical streams (v0.2, primary).
+
+    The decision at an opportunity may use only the STATE (half-inning h, score bucket d at the pitch, outs, tokens t) and
+    the opportunity's own (g, p): challenge iff p·g > (1−p)·[C(h,d,outs,t) − C(h,d,outs,t−1)], where C is the expected
+    continuation value after an opportunity in that state. Each iteration evaluates that policy on every instance
+    (expected value over success ~ Bernoulli(p), continuation = the instance's realized path under the policy — no max, so
+    no foresight), then re-averages the continuation values into C and the half-inning start values into V. Iterate to a
+    fixed point. Returns V[h, d+DMAX, t] (h = 1..HMAX+1, index HMAX+1 = terminal zeros) and C[h, d+DMAX, outs, t]."""
+    H, op_groups = _index_streams(op, hi)
+    V = np.zeros((HMAX + 2, 2 * DMAX + 1, TOK))
+    C = np.zeros((HMAX + 2, 2 * DMAX + 1, 3, TOK)) if C0 is None else C0.copy()
+    if C0 is None:
+        # warm start: the sample-path solution (over-optimistic but a good starting policy)
+        _, C = solve_foresight(op, hi, verbose=False)
+    t0 = time.time()
+    for it in range(n_iter):
+        V_new = np.zeros_like(V)
+        C_sum = np.zeros_like(C); C_n = np.zeros((HMAX + 2, 2 * DMAX + 1, 3))
+        for h in range(HMAX, 0, -1):
+            Hh = H[H["h_c"] == h]
+            for dstart in range(-DMAX, DMAX + 1):
+                sub = Hh[Hh["d_start"] == dstart]
+                if len(sub) == 0:
+                    V_new[h, dstart + DMAX, :] = V_new[h + 1, dstart + DMAX, :]
+                    continue
+                acc = np.zeros(TOK); n = 0
+                for r in sub.itertuples(index=False):
+                    key = (r.season, r.game_id, r.team_home, h)
+                    cont = np.zeros(TOK) if r.is_last else V_new[h + 1, r.d_end + DMAX, :].copy()   # game over -> 0
+                    nxt = h + 1
+                    if not r.is_last and nxt >= 19 and nxt % 2 == 1:      # start of an extra inning: a team with 0 tokens receives 1
+                        cont[0] = cont[1]
+                    W = cont
+                    if key in op_groups:
+                        gs, ps, os_, ds = op_groups[key]
+                        for i in range(len(gs) - 1, -1, -1):
+                            g, p = gs[i], ps[i]
+                            Cc = C[h, ds[i] + DMAX, os_[i], :]
+                            C_sum[h, ds[i] + DMAX, os_[i], :] += W; C_n[h, ds[i] + DMAX, os_[i]] += 1
+                            Wn = W.copy()
+                            for t in range(1, TOK):
+                                if p * g > (1 - p) * (Cc[t] - Cc[t - 1]):
+                                    Wn[t] = p * (g + W[t]) + (1 - p) * W[t - 1]
+                            W = Wn
+                    acc += W; n += 1
+                V_new[h, dstart + DMAX, :] = acc / n
+        C_new = np.zeros_like(C)
+        for h in range(1, HMAX + 1):
+            for d in range(2 * DMAX + 1):
+                for o in range(3):
+                    C_new[h, d, o, :] = C_sum[h, d, o, :] / C_n[h, d, o] if C_n[h, d, o] > 0 else V_new[h + 1, d, :]
+        delta = np.max(np.abs(C_new - C)); dV = np.max(np.abs(V_new - V))
+        V, C = V_new, C_new
+        if verbose:
+            print(f"  policy iteration {it+1}: V(2, start, tie) = {V[1, DMAX, 2]*100:.4f} pp, max|ΔC| = {delta:.2e}, max|ΔV| = {dV:.2e} ({time.time()-t0:.0f}s)", flush=True)
+        if delta < tol and it > 0:
+            break
     return V, C
 
 

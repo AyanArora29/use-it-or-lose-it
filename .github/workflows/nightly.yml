@@ -53,8 +53,8 @@ jobs:
             echo "no feeds on this runner"
           fi
 
-      - name: Build derived tables and figures
-        run: python code/analysis/build_all.py || echo "analysis pipeline not yet wired"
+      - name: Build derived tables and figures (opportunity table -> perception fits -> DP / policies)
+        run: python code/analysis/build_all.py || echo "::warning::analysis pipeline reported a failure"
 
       - name: Publish data assets to the rolling 'data' release (only what exists)
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -67,7 +67,7 @@ jobs:
           fi
           if [ -d data/raw/savant ]; then tar czf savant_leaderboards.tgz -C data/raw savant && upload savant_leaderboards.tgz; fi
           if [ -d data/raw/players ]; then tar czf players_transactions.tgz -C data/raw players transactions 2>/dev/null && upload players_transactions.tgz; fi
-          for f in data/derived/*.parquet data/derived/*.csv; do [ -s "$f" ] && upload "$f"; done
+          for f in data/derived/*.parquet data/derived/*.csv data/derived/*.md data/derived/*.json data/derived/*.npy; do [ -s "$f" ] && upload "$f"; done
           echo "done"
 
       - name: Run summary
@@ -77,6 +77,10 @@ jobs:
             echo "- statcast_2026.parquet: $([ -s data/raw/statcast/statcast_2026.parquet ] && du -h data/raw/statcast/statcast_2026.parquet | cut -f1 || echo missing)"
             echo "- feeds 2026: $([ -d data/raw/feeds/2026 ] && ls data/raw/feeds/2026 | wc -l || echo 0) games"
             echo "- challenge table: $([ -s data/derived/feed_2026_challenges.parquet ] && echo present || echo missing)"
+            echo "- opportunity table: $([ -s data/derived/opps_2026.parquet ] && echo present || echo missing)"
+            echo ""
+            if [ -s data/derived/verification_2026.md ]; then echo "### Verification"; cat data/derived/verification_2026.md; echo ""; fi
+            if [ -s data/derived/tier1_report_2026.md ]; then echo "### Tier-1"; cat data/derived/tier1_report_2026.md; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4

@@ -1,0 +1,7 @@
+# large raw pulls are published as GitHub Release assets, not committed
+data/raw/**
+!data/raw/.gitkeep
+data/derived/*.parquet
+*.joblib
+__pycache__/
+.ipynb_checkpoints/

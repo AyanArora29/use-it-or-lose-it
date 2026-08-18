@@ -1,0 +1,47 @@
+name: nightly-rebuild
+# Pulls fresh public data (Statcast current season, StatsAPI feeds, Savant leaderboards), rebuilds the derived
+# per-pitch ABS table and figures, runs the tests, and publishes data assets to a rolling GitHub Release.
+on:
+  schedule:
+    - cron: "0 9 * * *"     # 09:00 UTC daily
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: Restore historical Statcast seasons from the data release
+        run: |
+          mkdir -p data/raw/statcast
+          for y in 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025; do
+            gh release download data --pattern "statcast_$y.parquet" -D data/raw/statcast || true
+          done
+        env: { GH_TOKEN: "${{ github.token }}" }
+      - name: Pull current season + feeds + leaderboards + heights
+        run: |
+          python code/fetch/01_fetch_statcast.py --seasons 2026 --force
+          python code/fetch/02_fetch_statsapi_feeds.py --season 2026
+          python code/fetch/03_fetch_savant_leaderboards.py
+          python code/fetch/04_fetch_players_and_transactions.py --years 2026
+      - name: Tests
+        run: |
+          python code/engine/abs_zone.py
+          python code/engine/test_dp.py
+          python code/engine/perception.py
+      - name: Build derived tables and figures
+        run: python code/analysis/build_all.py || echo "analysis pipeline not yet wired"
+      - name: Publish data assets to the rolling 'data' release
+        run: |
+          gh release view data >/dev/null 2>&1 || gh release create data --title "Data (rolling)" --notes "Auto-updated public data assets"
+          gh release upload data data/raw/statcast/statcast_2026.parquet --clobber
+          tar czf feeds_2026.tgz -C data/raw feeds && gh release upload data feeds_2026.tgz --clobber
+          for f in data/derived/*.parquet; do [ -f "$f" ] && gh release upload data "$f" --clobber; done
+        env: { GH_TOKEN: "${{ github.token }}" }
+      - uses: actions/upload-artifact@v4
+        with: { name: figures, path: figures/, if-no-files-found: ignore }

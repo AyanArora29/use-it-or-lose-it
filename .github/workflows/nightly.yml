@@ -53,7 +53,8 @@ jobs:
             echo "no feeds on this runner"
           fi
 
-      - name: Build derived tables and figures (opportunity table -> perception fits -> DP / policies)
+      - name: Build derived tables and figures (opportunity table -> perception fits -> DP / policies -> robustness, counterfactuals, figures)
+        env: { BOOTSTRAP_B: "100" }
         run: python code/analysis/build_all.py || echo "::warning::analysis pipeline reported a failure"
 
       - name: Publish data assets to the rolling 'data' release (only what exists)
@@ -83,5 +84,9 @@ jobs:
             if [ -s data/derived/tier1_report_2026.md ]; then echo "### Tier-1"; cat data/derived/tier1_report_2026.md; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Publish figures to the data release too
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          if ls figures/*.png >/dev/null 2>&1; then tar czf figures.tgz figures && gh release upload data figures.tgz --clobber && echo "uploaded figures.tgz"; fi
       - uses: actions/upload-artifact@v4
         with: { name: figures, path: figures/, if-no-files-found: ignore }

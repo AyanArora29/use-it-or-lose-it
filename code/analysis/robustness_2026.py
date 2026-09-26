@@ -69,7 +69,7 @@ def run_variant(o, hi, gcol, pm, name, seed=100, D=60, pi=None, notes=""):
     return dict(variant=name, sigma_bat=pm["bat"][2], sigma_fld=pm["fld"][2], V2_start_pp=V[1, DMAX, 2] * 100,
                 MTV2_inn1_pp=(V[1, DMAX, 2] - V[1, DMAX, 1]) * 100, MTV1_inn1_pp=(V[1, DMAX, 1] - V[1, DMAX, 0]) * 100,
                 MTV2_inn9_pp=(V[17, DMAX, 2] - V[17, DMAX, 1]) * 100, obs_pp=obs * 100, opt_pp=opt * 100, oracle_pp=orc * 100,
-                capture=obs / opt, perception_cost=opt / orc, gap_wins162=(opt - obs) * 162, opt_used=r_opt["used"].sum() / n_tg,
+                capture=obs / opt, perception_cost=opt / orc, gap_wp=(opt - obs), opt_used=r_opt["used"].sum() / n_tg,
                 notes=notes)
 
 
@@ -119,15 +119,19 @@ def main():
     rows.append(run_variant(o, hi, "g", pm_from(fb, ff, {"bat": ff["sigma"], "fld": ff["sigma"]}), "counterfactual: batters perceive at catcher-level σ", seed=100)); print(rows[-1], flush=True)
     rows.append(run_variant(o, hi, "g", pm_from(fb, ff, {"bat": 1.0, "fld": 1.0}), "counterfactual: σ = 1.0 in both sides", seed=100)); print(rows[-1], flush=True)
     rows.append(run_variant(o, hi, "g", pm_from(fb, ff, {"bat": 0.5, "fld": 0.5}), "counterfactual: σ = 0.5 in both sides", seed=100)); print(rows[-1], flush=True)
-    # σ net of player thresholds (two-way probit, cell + player fixed effects) — perception noise lower bound in the pre-registered family
+    # Signal-scale sensitivity with player thresholds; this is not a formal bound on eyesight.
     pf = {sd: fit["sides"][sd].get("player_fe", {}).get("sigma", np.nan) for sd in ("bat", "fld")}
     if all(np.isfinite(v) for v in pf.values()):
         rows.append(run_variant(o, hi, "g", pm_from(fb, ff, pf), "σ from cell + player fixed effects (within-player noise)", seed=100,
                                 notes=f"σ_bat={pf['bat']:.2f}, σ_fld={pf['fld']:.2f}")); print(rows[-1], flush=True)
     # leakage-free split (METHODS §11): perception + DP on games through July 31, evaluated on August games
-    o_tr = o[o["game_date"] <= "2026-07-31"]; o_te = o[o["game_date"] > "2026-07-31"]
+    o_tr = o[o["game_date"] <= "2026-07-31"].copy(); o_te = o[o["game_date"] > "2026-07-31"].copy()
     if len(o_te) > 1000:
-        fbt = fit_side(o_tr, "bat", cells["bat"]); fft = fit_side(o_tr, "fld", cells["fld"])
+        # Every learned preprocessing choice, including terciles and cell support, uses training games only.
+        o_tr, train_q = add_cells(o_tr)
+        o_te, _ = add_cells(o_te, train_q)
+        train_cells = {s: sorted(o_tr.loc[(o_tr["side"] == s) & (o_tr["tokens"] >= 1), "cell"].unique()) for s in ("bat", "fld")}
+        fbt = fit_side(o_tr, "bat", train_cells["bat"]); fft = fit_side(o_tr, "fld", train_cells["fld"])
         pmt = {}
         for side, f in (("bat", fbt), ("fld", fft)):
             grid, p_m = posterior_pm(o_tr.loc[o_tr["side"] == side, "x_margin"].values, f["sigma"]); pmt[side] = (grid, p_m, f["sigma"])
@@ -154,10 +158,10 @@ def main():
         n_tg = os_te.groupby(["game_id", "team_home"]).ngroups
         obs = (os_te["g"] * os_te["challenged"] * os_te["truth"]).sum() / n_tg
         opt = r_opt["gain"].sum() / n_tg; orc = r_orc["gain"].mean()
-        rows.append(dict(variant="leakage-free split: perception + DP fit through Jul 31, evaluated on Aug games", sigma_bat=pmt["bat"][2], sigma_fld=pmt["fld"][2],
+        rows.append(dict(variant="time holdout: preprocessing + perception + DP fit through Jul 31, evaluated Aug-Sep", sigma_bat=pmt["bat"][2], sigma_fld=pmt["fld"][2],
                          V2_start_pp=V_tr[1, DMAX, 2] * 100, MTV2_inn1_pp=(V_tr[1, DMAX, 2] - V_tr[1, DMAX, 1]) * 100, MTV1_inn1_pp=(V_tr[1, DMAX, 1] - V_tr[1, DMAX, 0]) * 100,
                          MTV2_inn9_pp=(V_tr[17, DMAX, 2] - V_tr[17, DMAX, 1]) * 100, obs_pp=obs * 100, opt_pp=opt * 100, oracle_pp=orc * 100,
-                         capture=obs / opt, perception_cost=opt / orc, gap_wins162=(opt - obs) * 162, opt_used=r_opt["used"].sum() / n_tg,
+                         capture=obs / opt, perception_cost=opt / orc, gap_wp=(opt - obs), opt_used=r_opt["used"].sum() / n_tg,
                          notes=f"train {o_tr['game_pk'].nunique()} games, test {o_te['game_pk'].nunique()} games"))
         print(rows[-1], flush=True)
     df = pd.DataFrame(rows)

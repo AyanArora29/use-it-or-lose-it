@@ -29,10 +29,11 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from wp_model import WPCube, BASE_IDX  # noqa: E402
+from decision_state import count_class, validate_horizon
 
-DATA = os.path.join(HERE, "data")
+DATA = os.path.abspath(os.path.join(HERE, "..", "..", "data", "derived"))
 DMAX = 6          # score-diff bucket clip (team perspective)
-HMAX = 24         # half-innings modeled explicitly (through the 12th); beyond -> treated as HMAX
+HMAX = 40         # through inning 20; reject longer games rather than replay collapsed streams
 TOK = 3           # tokens 0,1,2
 
 
@@ -103,6 +104,7 @@ def team_bucket(sd_home, team_home):
 
 
 def _index_streams(op: pd.DataFrame, hi: pd.DataFrame):
+    validate_horizon(op, hi, HMAX)
     hi_rows = []
     for th in (0, 1):
         t = hi.copy(); t["team_home"] = th
@@ -173,9 +175,9 @@ def solve(op: pd.DataFrame, hi: pd.DataFrame, verbose=True, n_iter=12, tol=1e-6,
     H, op_groups = _index_streams(op, hi)
     V = np.zeros((HMAX + 2, 2 * DMAX + 1, TOK))
     C = np.zeros((HMAX + 2, 2 * DMAX + 1, 3, TOK)) if C0 is None else C0.copy()
-    if C0 is None:
-        # warm start: the sample-path solution (over-optimistic but a good starting policy)
-        _, C = solve_foresight(op, hi, verbose=False)
+    # Use the same zero initialization as the independent kernel. Finite policy
+    # iteration can cycle on aggregated empirical states; a foresight warm start
+    # can select a different approximate policy even after the same iteration cap.
     t0 = time.time()
     for it in range(n_iter):
         V_new = np.zeros_like(V)
@@ -276,7 +278,7 @@ def evaluate(op: pd.DataFrame, hi: pd.DataFrame, V, C, policy: str, thresh=0.5):
 # 4. The challenge card: break-even success probability by a handful of cells
 # ---------------------------------------------------------------------------------------------
 INN_BAND = lambda inn: np.where(inn <= 3, "1-3", np.where(inn <= 6, "4-6", np.where(inn <= 8, "7-8", "9+")))
-CNT_CLASS = lambda balls, strikes: np.where((balls == 3) | (strikes == 2), "PA-ending", "count-changing")
+CNT_CLASS = count_class
 
 
 def add_breakeven(op: pd.DataFrame, C) -> pd.DataFrame:

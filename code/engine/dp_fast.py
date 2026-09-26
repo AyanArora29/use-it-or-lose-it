@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import warnings
 from numba import njit
+from decision_state import validate_horizon
 
 DMAX = 6
-HMAX = 24
+HMAX = 40
 TOK = 3
 ND = 2 * DMAX + 1
 
@@ -27,6 +29,7 @@ def team_bucket(sd_home, team_home):
 def make_arrays(op: pd.DataFrame, hi: pd.DataFrame):
     """op: columns game_id, team_home, h, score_diff_home, g, p, outs (+ anything else); hi: game_id, h, sd_start, sd_end.
     Returns dict of arrays with opportunities re-sorted; keeps op['_pos'] mapping to the sorted order."""
+    validate_horizon(op, hi, HMAX)
     op = op.copy()
     op["_orig_index"] = np.arange(len(op))
     op = op.sort_values(["game_id", "team_home", "h", "_orig_index"], kind="mergesort").reset_index(drop=True)
@@ -127,16 +130,20 @@ def _solve_kernel(inst_h, inst_dstart, inst_dend, inst_last, inst_lo, inst_hi, g
         V = V_new
         if delta < tol and it > 0:
             break
-    return V, C
+    return V, C, delta, it + 1
 
 
-def solve_fast(A, C0=None, n_iter=30, tol=1e-7, tokens=2, retain=True, grant=True):
+def solve_fast(A, C0=None, n_iter=30, tol=1e-7, tokens=2, retain=True, grant=True, diagnostics=None):
     """State-based policy iteration. tokens = challenges per team at game start (2 in 2026); retain = keep on success;
     grant = extra-innings grant. Returns V[h, d, t] and C[h, d, outs, t] for t = 0..tokens."""
     ntok = tokens + 1
     C = np.zeros((HMAX + 2, ND, 3, ntok)) if C0 is None else np.ascontiguousarray(C0, dtype=np.float64)
-    V, C = _solve_kernel(A["inst_h"], A["inst_dstart"], A["inst_dend"], A["inst_last"], A["inst_lo"], A["inst_hi"],
+    V, C, residual, iterations = _solve_kernel(A["inst_h"], A["inst_dstart"], A["inst_dend"], A["inst_last"], A["inst_lo"], A["inst_hi"],
                          A["g"], A["p"], A["outs"], A["d_pitch"], C, n_iter, tol, 1 if retain else 0, 1 if grant else 0)
+    if diagnostics is not None:
+        diagnostics.update(iterations=int(iterations), last_update=float(residual), tolerance=float(tol), converged=bool(residual < tol))
+    if residual >= tol:
+        warnings.warn(f"Approximate policy iteration reached {iterations} iterations with continuation update {residual:.3g} > tolerance {tol:.3g}", RuntimeWarning, stacklevel=2)
     return V, C
 
 
@@ -177,8 +184,9 @@ def _sim_kernel(tg_lo, tg_hi, x, g, truth, side, inn, h, d_pitch, outs, sig_side
                 elif policy == 6:
                     go = False
                 elif policy == 5:
-                    if not np.isnan(tau_opp[i]):
-                        z = (x[i] - tau_opp[i]) / sig_obs[side[i]]
+                    threshold = tau_opp[i, min(tok[dd], 2) - 1]
+                    if not np.isnan(threshold):
+                        z = (x[i] - threshold) / sig_obs[side[i]]
                         # Φ(z) via erf
                         pc = 0.5 * (1.0 + _erf(z / np.sqrt(2.0)))
                         go = np.random.random() < pc
@@ -239,7 +247,9 @@ def simulate_fast(op_sorted: pd.DataFrame, C, pm, policy, D=200, seed=1, tau_opp
     sig_side = np.array([pm["bat"][2], pm["fld"][2]], dtype=np.float64)
     gb, pb, _ = pm["bat"]; gf, pf, _ = pm["fld"]
     n = len(o)
-    tau_opp = np.full(n, np.nan) if tau_opp is None else np.asarray(tau_opp, dtype=np.float64)
+    tau_opp = np.full((n, 2), np.nan) if tau_opp is None else np.asarray(tau_opp, dtype=np.float64)
+    if tau_opp.shape != (n, 2):
+        raise ValueError("tau_opp must have one column per simulated inventory (1, 2)")
     sig_obs = sig_side if sig_obs is None else np.asarray(sig_obs, dtype=np.float64)
     thr1 = np.full(n, 0.5) if thr1 is None else np.asarray(thr1, dtype=np.float64)
     thr2 = np.full(n, 0.5) if thr2 is None else np.asarray(thr2, dtype=np.float64)

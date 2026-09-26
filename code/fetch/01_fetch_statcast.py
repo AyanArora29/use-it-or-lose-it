@@ -67,6 +67,7 @@ def main():
     seasons = args.seasons or sorted(SEASON_WINDOWS, reverse=True)
     yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
 
+    failures = []
     for season in seasons:
         if season not in SEASON_WINDOWS:
             print(f"[skip] no window defined for {season}")
@@ -83,9 +84,11 @@ def main():
             df = statcast(start_dt=start, end_dt=end, verbose=True, parallel=True)
         except Exception as e:
             print(f"[error] season {season}: {e!r}. Re-run to resume (cache is on).")
+            failures.append(season)
             continue
         if df is None or df.empty:
             print(f"[warn] season {season}: no rows returned")
+            failures.append(season)
             continue
         # keep everything Savant gives us; downstream code selects columns
         df["season"] = season
@@ -109,6 +112,8 @@ def main():
         print(f"\nWrote {os.path.join(OUT_DIR, 'COLUMNS.txt')}")
     except Exception as e:
         print(f"(manifest skipped: {e})")
+    if failures:
+        raise SystemExit(f"Statcast pulls failed or returned no data: {failures}")
 
 
 if __name__ == "__main__":

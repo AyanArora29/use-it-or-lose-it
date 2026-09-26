@@ -1,0 +1,55 @@
+# Current methods and claim boundaries — audit revision, September 26, 2026
+
+This document describes the implemented analysis after the September 26 audit. It takes precedence over descriptions of completed work in the dated METHODS.md plan. The original plan and its decision log remain available as history. This revision is explicitly post-data-contact; neither a dated file nor pre-specifying several hypotheses establishes external preregistration or controls family-wise error.
+
+## Question and estimand
+
+We estimate the value of allocating MLB ABS challenges across eligible called pitches under an explicit information model. The outcome is the **sum of nonnegative estimated win-probability gains from call reversals per team-game, evaluated along recorded game sequences**. A challenge can change the future count, plate appearance, score, and sequence of pitches; the simulator does not generate those alternative games. Therefore this sum is not a causal change in game-win probability, and multiplying it by 162 does not establish season wins gained.
+
+The policy is an approximate state-based dynamic-programming benchmark. Its decision uses the current estimated reversal gain, posterior probability of success, and continuation values indexed by half-inning, score bucket, outs, and available challenges. Recorded future paths enter policy evaluation; the decision itself does not inspect the future pitches of an individual game. State aggregation and an empirical prior pooled within batting/fielding side are approximations. We do not claim a globally optimal policy for the full game or players' complete information sets.
+
+## Data and geometry
+
+The frozen audit snapshot was downloaded September 26 and covers regular-season games through September 25. There are 10,438 parsed challenge events; 10,425 survive the opportunity eligibility/join rules in 2,398 ABS games. The table contains 351,655 eligible called pitches before the velocity-based position-player-pitching exclusion, and 350,588 after it. Counts must be labeled with their respective denominator. This is a partial-season snapshot.
+
+Original and final calls are separate fields. The StatsAPI feed stores reviews at event and play levels, including additional reviews. Original calls are recovered from the final call and review result. Pitches join Statcast one-to-one on game, at-bat number, and pitch number. The build checks source reconciliation, join integrity, available tokens, finite geometry/rewards, and verdict agreement. The <75 mph pitcher-game mean-speed exclusion is an operational proxy, not a roster-role classification.
+
+The MLB strike zone is a physical rectangle at mid-plate, 17 inches wide and 27%–53.5% of certified height. The ball intersects it when the ball-center distance to the rectangle is no greater than the assumed 1.45-inch ball radius. The ball-center strike region has rounded corners. The old code expanded four edges before computing distance, filling those corners incorrectly; the audit subtracts the ball radius after computing signed Euclidean distance. This is a geometric correction, not tuning to maximize verdict agreement. Front-plane feed trajectories are propagated to mid-plate; 2026 Statcast coordinates are already mid-plate and must not be propagated again.
+
+Corrected classifications agree with 10,422 of 10,425 eligible challenged-pitch verdicts (99.9712%). Two remaining disagreements are within 0.01 inch of the boundary; one is 0.762 inch away. Their official feed records were re-read, but their public tracking/verdict discrepancy remains unresolved. Agreement is conditional on challenged pitches and is not a validation of every unchallenged pitch. The previously planned independent manual audit of 200 randomly selected challenges has not been demonstrated by an audit trail; a reproducible sample is prepared separately.
+
+Rules and coordinate definitions: [MLB adoption notice](https://img.mlbstatic.com/opprops-images/image/upload/opprops/jgdgj1bak2bgiskwpdnm.pdf), [Baseball Savant ABS documentation](https://baseballsavant.mlb.com/abs), [Statcast CSV documentation](https://baseballsavant.mlb.com/csv-docs).
+
+## Pricing and challenge behavior
+
+Primary pitch values use the versioned count-composed WP cube: plate-appearance transition frequencies combined with a count-free historical WP model. A direct count-level WP cube is a sensitivity. The audit reproduces downstream values from those fixed cubes; it does not claim to have rebuilt the historical Retrosheet training input. The repository does not currently provide a complete raw-input/training artifact chain for that rebuild. The historical seven-inning-game exclusion claimed in the old plan is not enforced in the parser. This provenance/exclusion issue remains to resolve before describing full end-to-end reproduction.
+
+The direct-cube terminal transition now ends a bottom-nine-or-later bases-loaded walk-off at home WP = 1. Signed primary and alternative gains are preserved in `g_raw` and `g_v1_raw`; policy reward `g` remains clipped at zero. Consequently even the observed numerator is a nonnegative-reversal-value measure. The audit reports the small difference if actual challenges are scored with signed gains.
+
+Challenge propensity follows a probit in true signed margin with side-specific scale and thresholds for inning band, observed token stock, within-side gain tercile, and count class. A count is PA-ending when **either** possible ruling can end the plate appearance (three balls OR two strikes). This common definition now applies in fitting, the decision card, bootstrap, and decomposition. It is a post-data correction: the old fit used a different, original-call-specific definition.
+
+The fitted scale is an effective decision-noise parameter under a Gaussian signal/threshold model. It may absorb attention, heterogeneous preferences and thresholds, tracking error, misspecification, and team/player decision processes. It is not an identified measurement of eyesight. Batting and fielding comparisons concern different selected call populations; fielding includes catchers and pitchers. Neither scale nor capture ratio is a proved upper bound without further assumptions. Synthetic recovery verifies the estimator under its own assumptions, not those assumptions in MLB.
+
+## Policy, card, and uncertainty
+
+Teams start with two challenges, keep successful challenges, lose failed ones, and receive one at the start of an extra inning when empty. Game-end continuation is zero. Half-innings remain distinct through inning 20; longer games cause an explicit error rather than silently repeating collapsed opportunities. The fitted observed-policy simulation uses its simulated inventory to choose the threshold. Recorded verdicts are a separately labeled sensitivity; the primary numerator and simulated denominator use the same geometric outcome.
+
+The decision card has 4 inning bands × 2 count classes × 3 gain bands × 2 inventory levels = **48 thresholds**, displayed in eight rows. Its value is an in-sample simulated simplification of the benchmark, not evidence that distributing a card causes teams to improve. Deployment would also require players to estimate success confidence and recognize gain bands; that usability/calibration work has not been tested.
+
+The primary point estimate uses two independent signal streams for policy fitting and 200 simulation draws. The refit bootstrap resamples games, refits propensity, recomputes the signal posterior, re-solves the policy, and re-simulates it; 200 replicates use 30 simulation draws each. The historical WP cubes, geometry, model family, and full-sample leverage cut points remain fixed. Its percentile interval is conditional on those choices, not all research uncertainty. The simpler 1,000-resample interval holds the fitted policy fixed and is labeled separately. Refit-bootstrap point estimates can differ slightly from the headline because they use a single policy stream and fewer simulation draws.
+
+Sensitivity analyses include the direct WP cube, alternative marginal-pitch exclusions, different signal seeds, player effects, and a hurdle model for attention. The attention-limited variant uses a sampled opportunity mask and should be treated as exploratory. Counterfactual changes to signal precision, token allocation, retention, or extras grants retain the observed pitch sequences and do not model strategic adaptation. Time estimates based on 14 seconds per challenge are assumptions, not observed treatment effects.
+
+Temporal evaluation fits preprocessing cut points, propensity, and the policy on games through July 31, then evaluates August–September. It is an out-of-time evaluation inside a model developed after seeing 2026 data, not an untouched prospective validation. The old implementation also used full-season cut points; that leakage has been removed.
+
+## Contribution and scope
+
+The contribution is an MLB application joining recovered original calls, geometry, call values, observed challenge decisions, and resource-allocation policies in a reproducible pitch-level workflow. Retention and the opportunity-cost threshold are established ideas. [Abramitzky, Einav, Kolkowitz and Mill (2012)](https://web.stanford.edu/~leinav/pubs/IER2012.pdf) already model retained-on-success tennis challenges and compare observed choices with a dynamic benchmark. Do not claim that renewable review rights or their Bellman inequality are new.
+
+The completed scope is challenge allocation, descriptive propensity, model-based sensitivity, and rule counterfactuals. The old drafts' causal umpire-response designs, framing/challenge equilibrium, multi-agent identification, and broad cross-league causal analyses are proposals, not completed findings. Team rankings and learning regressions are exploratory; no multiplicity-adjusted confirmatory family is implemented. Future full-paper work should prioritize the WP training provenance, prospective/out-of-time calibration and card evaluation, and sensitivity to future-game transitions before adding new empirical topics.
+
+## Numerical audit detail
+
+Python and Numba continuation/value arrays agree to below 6e-17 on a fixed 104-game sample (including every game reaching inning 13) when given identical streams and zero initialization. The old Python implementation used a foresight warm start while Numba started at zero; the audit aligns them.
+
+Agreement between implementations does not establish convergence. The primary full-sample iteration reaches a two-cycle: one additional update changes continuation values by at most 0.00013574 WP (0.013574 percentage points), above its nominal 1e-7 tolerance. With identical evaluation draws, adjacent phases yield 2.56645 versus 2.56839 points per team-game, a difference of 0.00194 points. Caps of 30, 40, 60, 120 and 240 iterations give the same even-phase value. The reported primary policy uses 60 iterations. The kernel now exposes diagnostics and warns when the tolerance is unmet. The audited abstract calls this an approximate benchmark; it does not claim a converged optimum.

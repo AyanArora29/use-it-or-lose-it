@@ -34,7 +34,7 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "code"))
-from abs_zone import propagate_to_midpoint, BALL_RADIUS, PLATE_HALF_WIDTH  # noqa: E402
+from abs_zone import propagate_to_midpoint, signed_miss_from_bounds  # noqa: E402
 
 TOP_FRAC, BOT_FRAC = 0.535, 0.27
 ABS_TYPE = "MJ"
@@ -49,15 +49,8 @@ def load(path):
 
 
 def signed_miss_from_edges(x, z, z_lo, z_hi, expand=True):
-    """Signed distance (in) from ball centre to the ABS rectangle given zone edges in feet; negative inside."""
-    r = BALL_RADIUS if expand else 0.0
-    x_lo, x_hi = -(PLATE_HALF_WIDTH + r), (PLATE_HALF_WIDTH + r)
-    zl, zh = z_lo - r, z_hi + r
-    dx = np.maximum(np.maximum(x_lo - x, x - x_hi), 0.0)
-    dz = np.maximum(np.maximum(zl - z, z - zh), 0.0)
-    outside = np.sqrt(dx * dx + dz * dz)
-    inside = np.minimum(np.minimum(x - x_lo, x_hi - x), np.minimum(z - zl, zh - z))
-    return np.where(outside > 0, outside, -inside) * 12.0
+    """Ball-edge clearance (inches), including the rounded ball-center boundary at corners."""
+    return signed_miss_from_bounds(x, z, z_lo, z_hi, expand_ball=expand)
 
 
 def _reviews(rd):
@@ -206,15 +199,22 @@ def main():
     files = sorted(glob.glob(os.path.join(args.feeds, "*.json.gz")) + glob.glob(os.path.join(args.feeds, "*.json")))
     if args.limit:
         files = files[:args.limit]
-    P, G, W = [], [], []
+    P, G, W, errors = [], [], [], []
     for i, f in enumerate(files, 1):
         try:
             df, g, w = parse_game(load(f)); P.append(df); G.append(g); W.extend(w)
         except Exception as e:
             print(f"[warn] {f}: {e!r}")
+            errors.append(f)
         if i % 200 == 0:
             print(f"  {i}/{len(files)}", flush=True)
+    if errors or not P:
+        raise RuntimeError(f"Extraction incomplete: {len(errors)} failed files, {len(P)} parsed games")
     pitches = pd.concat(P, ignore_index=True); games = pd.DataFrame(G)
+    tally_cols = ["away_usedSuccessful", "away_usedFailed", "home_usedSuccessful", "home_usedFailed"]
+    tally = games[tally_cols].sum(axis=1)
+    if (games["n_challenges"] != tally).any():
+        raise RuntimeError("Parsed challenge events do not reconcile with gameData totals")
     chal = pitches[pitches["challenged"] == 1].copy()
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     pitches.to_parquet(args.out + "_pitches.parquet", index=False)

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,8 @@ from scipy.stats import norm
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DERIVED = os.path.join(ROOT, "data", "derived")
+sys.path.insert(0, os.path.join(ROOT, "code", "engine"))
+from decision_state import count_class
 
 INN_BAND = lambda inn: np.where(inn <= 3, "1-3", np.where(inn <= 6, "4-6", np.where(inn <= 8, "7-8", "9+")))
 BINS = [-30, -6, -4, -3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3, 4, 6, 40]
@@ -37,7 +40,7 @@ def add_cells(o: pd.DataFrame, lev_q=None):
     o = o.copy()
     o["side"] = np.where(o["orig"] == "S", "bat", "fld")
     o["inn_band"] = INN_BAND(o["inning"].values)
-    o["cnt"] = np.where(o["pa_ending"] == 1, "PA-ending", "count-changing")
+    o["cnt"] = count_class(o["balls"], o["strikes"])
     if lev_q is None:
         lev_q = {s: tuple(o.loc[o["side"] == s, "g"].quantile([1 / 3, 2 / 3]).values) for s in ("bat", "fld")}
     lev = np.empty(len(o), dtype=object)
@@ -80,6 +83,8 @@ def fit_probit(x, y, cell_idx, n_cells, hurdle=False):
 
     theta0 = np.concatenate([[np.log(0.4)], np.full(n_cells, -1.5), [1.5] if hurdle else []])
     res = minimize(nll, theta0, jac=grad, method="L-BFGS-B", options={"maxiter": 2000})
+    if not res.success or not np.isfinite(res.fun):
+        raise RuntimeError(f"Probit did not converge: {res.message}")
     a, b, pi = unpack(res.x)
     return dict(sigma=1 / a, tau=-b / a, pi=pi, nll=res.fun, converged=bool(res.success), n=int(len(x)), k=len(res.x))
 
@@ -97,6 +102,8 @@ def fit_twoway(x, y, c1, n1, c2, n2):
         return -np.concatenate([[(gz * x).sum() * a], np.bincount(c1, weights=gz, minlength=n1), np.bincount(c2, weights=gz, minlength=n2)])
     th0 = np.concatenate([[np.log(0.4)], np.full(n1, -1.5), np.zeros(n2)])
     r = minimize(nll, th0, jac=grad, method="L-BFGS-B", options={"maxiter": 3000})
+    if not r.success or not np.isfinite(r.fun):
+        raise RuntimeError(f"Two-way probit did not converge: {r.message}")
     a, b, d = unpack(r.x)
     return 1 / a, b, d, r.fun, bool(r.success)
 

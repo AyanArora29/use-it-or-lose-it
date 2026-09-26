@@ -114,10 +114,15 @@ def simulate(op: pd.DataFrame, C, pm, policy, D=200, seed=1, card_fn=None, fit=N
             if policy == "oracle":
                 go = np.full(D, truth[i])
             elif policy == "observed_model":
-                # fitted P(challenge | x, cell) — the model-based observed policy (Bernoulli)
-                tau = fit["sides"][role[i]]["pooled"]["tau"].get(cells[i], np.nan)
+                # Use the SIMULATED inventory, not the historically observed token cell.
+                parts = cells[i].split("|")
+                tau_by_token = []
+                for token in (1, 2):
+                    parts[1] = str(token)
+                    tau_by_token.append(fit["sides"][role[i]]["pooled"]["tau"].get("|".join(parts), np.nan))
+                tau = np.asarray(tau_by_token)[np.maximum(tok - 1, 0)]
                 s_ = fit["sides"][role[i]]["pooled"]["sigma"]
-                pc = norm.cdf((x[i] - tau) / s_) if np.isfinite(tau) else 0.0
+                pc = np.where(np.isfinite(tau), norm.cdf((x[i] - tau) / s_), 0.0)
                 go = rng.random(D) < pc
             else:
                 m = x[i] + rng.normal(0, sig, D)
@@ -164,6 +169,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--draws", type=int, default=200)
     ap.add_argument("--reps", type=int, default=2, help="stream replications with independent ε draws for the DP solve")
+    ap.add_argument("--solver", choices=["python", "numba"], default="numba")
     args = ap.parse_args()
     t0 = time.time()
     o = pd.read_parquet(os.path.join(DERIVED, "opps_2026.parquet"))
@@ -172,7 +178,7 @@ def main():
     o, lev_q = add_cells(o, {k: tuple(v) for k, v in fit["lev_q"].items()})
     pm = load_pm(os.path.join(DERIVED, "perception_pm_2026.npz"))
     hi = half_inning_paths(os.path.join(ROOT, "data", "raw", "statcast", "statcast_2026.parquet"), set(o["game_pk"]))
-    rep = ["# Tier-1 results — 2026 (METHODS §6–§7)", ""]
+    rep = ["# Tier-1 results — 2026", "", "Values sum nonnegative estimated reversal gains along recorded game paths. These are conditional model benchmarks, not causal changes in game wins. The approximate state-based policy is not a proven global optimum.", ""]
     rep.append(f"- Streams: {o['game_pk'].nunique():,} games, {len(o):,} opportunities, {len(hi):,} half-innings; σ_bat = {pm['bat'][2]:.2f} in, σ_fld = {pm['fld'][2]:.2f} in.")
 
     # ---- DP solve on replicated streams -------------------------------------------------------------------------
@@ -184,7 +190,12 @@ def main():
     op_all = pd.concat(ops, ignore_index=True)
     hi_all = pd.concat([hi.assign(game_id=hi["game_id"] * 10 + r) for r in range(args.reps)], ignore_index=True)
     print(f"solving DP on {len(op_all):,} opportunities ({args.reps} replications) ...", flush=True)
-    V, C = solve(op_all, hi_all, verbose=True)
+    solver_diagnostics = {"solver": args.solver}
+    if args.solver == "numba":
+        from dp_fast import make_arrays, solve_fast
+        V, C = solve_fast(make_arrays(op_all, hi_all), n_iter=60, diagnostics=solver_diagnostics)
+    else:
+        V, C = solve(op_all, hi_all, verbose=True, n_iter=60, tol=1e-7)
     np.save(os.path.join(DERIVED, "dp_V_2026.npy"), V); np.save(os.path.join(DERIVED, "dp_C_2026.npy"), C)
     M = mtv(V)
     rows = []
@@ -241,12 +252,12 @@ def main():
     cap = results["observed_realized"]["gain"] / results["optimal"]["gain"]
     cap_model = results["observed_model"]["gain"] / results["optimal"]["gain"]
     perc_cost = results["optimal"]["gain"] / results["oracle"]["gain"]
-    rep.append(f"- **Value of the two challenges (information-constrained optimum on the actual 2026 streams): {results['optimal']['gain']*100:.2f} WP points per team-game "
-               f"≈ {results['optimal']['gain']*162:.2f} wins per 162 games; teams realized {results['observed_realized']['gain']*100:.2f} pp ≈ {results['observed_realized']['gain']*162:.2f} wins "
+    rep.append(f"- **Modeled cumulative reversal value: benchmark {results['optimal']['gain']*100:.2f} WP points per team-game; "
+               f"observed challenges {results['observed_realized']['gain']*100:.2f} pp "
                f"(scored by the ABS verdict as recorded: {results['observed_realized_abs_verdict']['gain']*100:.2f} pp).**")
     rep.append(f"- **Capture ratio (observed realized ÷ information-constrained optimum): {cap:.3f}**; model-based observed ÷ optimum: {cap_model:.3f}; "
                f"information-constrained optimum ÷ oracle: {perc_cost:.3f} (the perception cost). Gap = "
-               f"{(results['optimal']['gain']-results['observed_realized']['gain'])*100:.3f} pp per team-game = {(results['optimal']['gain']-results['observed_realized']['gain'])*162:.2f} wins per 162 games. "
+               f"{(results['optimal']['gain']-results['observed_realized']['gain'])*100:.3f} pp per team-game. "
                f"The capture ratio is conditional on the fitted perception noise σ (all decision variance not explained by the state cells is treated as perceptual); "
                f"see tier1_robustness_2026 for σ from player fixed effects and other variants.")
     # game-clustered bootstrap for the capture ratio (policy simulations fixed)
@@ -267,14 +278,14 @@ def main():
     op["mtv_obs"] = np.where(op["tokens_obs"] >= 2, op["mtv_t2"], op["mtv_t1"])
     op["pstar_obs"] = np.where(op["tokens_obs"] >= 2, op["pstar_t2"], op["pstar_t1"])
     ch = op[op["challenged"] == 1].copy()
-    ch["ex_post"] = np.where(ch["overturned"] == 1, ch["g"], -ch["mtv_obs"])
+    ch["ex_post"] = np.where(ch["truth"] == 1, ch["g"], -ch["mtv_obs"])
     rep.append(f"- Ex-post value of actual challenges (successful: +g; failed: −MTV at decision time): mean {ch['ex_post'].mean()*100:.3f} pp per challenge; "
                f"share with negative ex-post value {(ch['ex_post']<0).mean():.3f}; by side: " +
                "; ".join(f"{s}: {v*100:.3f} pp" for s, v in ch.groupby("role")["ex_post"].mean().items()))
     # missed clear misses: unchallenged with x > 2 in and tokens >= 1
     miss = op[(op["challenged"] == 0) & (op["x"] > 2) & (op["tokens_obs"] >= 1)]
     rep.append(f"- Missed clear misses (unchallenged, true margin > 2 in, tokens in hand): {len(miss):,} pitches worth {miss['g'].sum()*100/ (o['game_pk'].nunique()*2):.3f} pp per team-game in WP "
-               f"({miss['g'].sum()*162/(o['game_pk'].nunique()*2):.2f} wins per 162 games at face value).")
+               f"(sum along recorded game paths, not causal wins).")
 
     # ---- model-free dump test + WP-weighted dump index --------------------------------------------------------------
     late = op[(op["inning"] >= 9)]
@@ -310,7 +321,8 @@ def main():
     rep.append(f"- Mean (p̂ − p*) of actual challenges: innings 1–8: {(early_thr['p_hat']-early_thr['pstar_obs']).mean():.3f}; 9th+: {(late_thr['p_hat']-late_thr['pstar_obs']).mean():.3f} "
                f"(negative = challenges made below the break-even probability).")
 
-    results["dp"] = dict(V2_start_tie=v0, wins_per_162=v0 * 162)
+    results["dp"] = dict(V2_start_tie=v0)
+    results["solver_diagnostics"] = solver_diagnostics
     with open(os.path.join(DERIVED, "tier1_results_2026.json"), "w") as fh:
         json.dump(results, fh, indent=1, default=float)
     op.to_parquet(os.path.join(DERIVED, "tier1_opps_with_breakeven.parquet"), index=False)

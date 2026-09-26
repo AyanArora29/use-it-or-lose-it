@@ -31,6 +31,8 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "code", "engine"))
 from wp_model import WPCube  # noqa: E402
 from wp_count import WPCountCube  # noqa: E402
+from abs_zone import signed_miss_from_bounds
+from decision_state import count_class
 
 DERIVED = os.path.join(ROOT, "data", "derived")
 ELIGIBLE_DESC = {"called_strike", "ball", "blocked_ball"}
@@ -39,8 +41,9 @@ ELIGIBLE_DESC = {"called_strike", "ball", "blocked_ball"}
 def replay_tokens(fp: pd.DataFrame, extras_rule="start_of_inning"):
     """Tokens in hand for both teams before every pitch, replaying the game's ABS challenges in order.
     2026 rule: 2 per team; retained on success; lost on failure; from the 10th inning a team with none receives one at the
-    start of each extra inning (extras_rule='start_of_inning'); alternative reading 'per_half' grants at the start of the
-    team's own half (sensitivity)."""
+    start of each extra inning (extras_rule='start_of_inning')."""
+    if extras_rule != "start_of_inning":
+        raise ValueError("Only the verified start_of_inning rule is implemented")
     fp = fp.sort_values(["gamePk", "atBatIndex", "eventIndex"]).reset_index(drop=True)
     th = np.zeros(len(fp), dtype=np.int8); ta = np.zeros(len(fp), dtype=np.int8)
     final = {}
@@ -56,8 +59,6 @@ def replay_tokens(fp: pd.DataFrame, extras_rule="start_of_inning"):
                         if home == 0: home = 1
                         if away == 0: away = 1
                 last_inning = inn[j]
-            if extras_rule == "per_half" and inn[j] >= 10:
-                pass  # (implemented in the sensitivity script)
             th[i] = home; ta[i] = away
             if ch[j] == 1 and ov[j] == 0:
                 # who lost the token: challenger's team
@@ -81,6 +82,9 @@ def main():
     rep = ["# Verification report — 2026 opportunity table (METHODS §2.1)", ""]
 
     fp = pd.read_parquet(args.feed)
+    # Recompute even when loading a previously published feed table made with older geometry.
+    fp["d_in"] = signed_miss_from_bounds(fp["x_mid"], fp["z_mid"], fp["szBot"], fp["szTop"])
+    fp["d_in_center"] = signed_miss_from_bounds(fp["x_mid"], fp["z_mid"], fp["szBot"], fp["szTop"], False)
     games = pd.read_csv(args.games)
     sc = pd.read_parquet(args.statcast, columns=["game_pk", "game_type", "game_date", "at_bat_number", "pitch_number", "description",
                                                  "balls", "strikes", "outs_when_up", "inning", "inning_topbot", "on_1b", "on_2b", "on_3b",
@@ -103,7 +107,7 @@ def main():
     rep.append(f"- Token replay audit (nine-inning games, where gameData.remaining = 2 − failed challenges): final tokens match for both teams in "
                f"{ok_tok[nine & audit['home_remaining'].notna()].mean()*100:.2f}% of {int((nine & audit['home_remaining'].notna()).sum()):,} games. "
                f"gameData.remaining ignores extra-inning grants (it equals max(0, 2 − usedFailed) in {((audit['home_remaining'] == (2 - g['home_usedFailed']).clip(lower=0)).mean())*100:.1f}% of games), "
-               f"so extra-inning games are audited by consistency instead: under the pre-registered reading (a team with no challenge receives one at the "
+               f"so extra-inning games are audited by consistency instead: under the documented rule (a team with no challenge receives one at the "
                f"start of each extra inning) every one of the {int(fp['challenged'].sum()):,} observed challenges was made with ≥1 token in hand — "
                f"violations: {int(((fp['challenged']==1) & (np.where(((fp['challenger_side']=='bat')&(fp['bat_home']==1))|((fp['challenger_side']=='fld')&(fp['bat_home']==0)), fp['tokens_home'], fp['tokens_away'])==0)).sum())}.")
     summ = g[["away_usedSuccessful", "away_usedFailed", "home_usedSuccessful", "home_usedFailed"]].sum().sum()
@@ -115,6 +119,8 @@ def main():
     # ---- game coverage: Statcast regular-season games absent from the feed pull ---------------------------------------
     sc_games = sc.drop_duplicates("game_pk")[["game_pk", "game_date", "home_team", "away_team"]]
     miss_g = sc_games[~sc_games["game_pk"].isin(fp["gamePk"])]
+    if len(miss_g):
+        raise ValueError(f"Feed pull is missing {len(miss_g)} regular-season Statcast games")
     rep.append(f"- Game coverage: {len(miss_g)} Statcast regular-season games are absent from the feed pull"
                + (f" ({', '.join(str(x) for x in miss_g['game_pk'].head(25))})" if len(miss_g) else "") +
                f"; {int((~fp['gamePk'].isin(sc_games['game_pk'])).sum() and fp.loc[~fp['gamePk'].isin(sc_games['game_pk']), 'gamePk'].nunique())} feed games are not yet in Statcast (usually the latest date).")
@@ -150,11 +156,13 @@ def main():
     # ---- join to Statcast -----------------------------------------------------------------------------------------
     key = ["game_pk", "at_bat_number", "pitch_number"]
     fp = fp.rename(columns={"gamePk": "game_pk", "pitchNumber": "pitch_number"})
-    m = fp.merge(sc.drop(columns=["game_date", "batter", "pitcher", "stand", "p_throws"]), on=key, how="left", suffixes=("", "_sc"))
+    m = fp.merge(sc.drop(columns=["game_date", "batter", "pitcher", "stand", "p_throws"]), on=key, how="left", suffixes=("", "_sc"), validate="one_to_one")
     m["joined"] = m["sc_description"].notna() & m["balls"].notna()
     called_mask = m["call_original"].isin(["B", "C"]) & m["code"].isin(["B", "C", "*B"])
     common_games = set(fp["game_pk"]).intersection(set(sc["game_pk"]))
     in_common = m["game_pk"].isin(common_games)
+    if m.loc[in_common & called_mask, "joined"].mean() < 0.99:
+        raise ValueError("Called-pitch join rate is below the documented 99% requirement")
     rep.append(f"- Join key (game_pk, at_bat_number = atBatIndex+1, pitch_number): match rate {m.loc[in_common, 'joined'].mean()*100:.3f}% of feed pitches "
                f"in the {len(common_games):,} games present in both sources; {m.loc[in_common & called_mask, 'joined'].mean()*100:.3f}% of called pitches; "
                f"{m.loc[in_common & (m['challenged']==1), 'joined'].mean()*100:.3f}% of challenged pitches.")
@@ -203,10 +211,9 @@ def main():
     o["tokens"] = np.where(o["team_home"] == 1, o["tokens_home"], o["tokens_away"]).astype(int)
     o["tokens_opp"] = np.where(o["team_home"] == 1, o["tokens_away"], o["tokens_home"]).astype(int)
     o["x_margin"] = np.where(o["orig"] == "S", o["d_in"], -o["d_in"])
-    o["truth"] = (o["x_margin"] > 0).astype(int)
+    o["truth"] = np.where(o["orig"] == "S", o["d_in"] > 0, o["d_in"] <= 0).astype(int)
     o["h"] = (o["inning"] - 1) * 2 + o["bat_home"] + 1
-    o["pa_ending"] = ((o["orig"] == "S") & (o["strikes"] == 2)) | ((o["orig"] == "B") & (o["balls"] == 3))
-    o["pa_ending"] = o["pa_ending"].astype(int)
+    o["pa_ending"] = (count_class(o["balls"], o["strikes"]) == "PA-ending").astype(int)
     # nearest edge type for the measurement-error model
     r = 1.45 / 12; half_w = 17 / 24
     d_side = np.maximum(np.abs(o["x_mid"]) - (half_w + r), -(np.abs(o["x_mid"]) - (half_w + r)))
@@ -224,7 +231,9 @@ def main():
                  o["sd_home"].values[mk], o["balls"].values[mk], o["strikes"].values[mk], call)
         gain[mk] = cube2.flip_gain(*args_)
         gain1[mk] = cube.flip_gain(*args_)
+    o["g_raw"] = gain; o["g_v1_raw"] = gain1
     o["g"] = np.maximum(gain, 0.0); o["g_v1"] = np.maximum(gain1, 0.0)
+    rep.append(f"- Negative estimated flip gains: {int((gain < 0).sum()):,}; signed values preserved in g_raw, primary policy reward clipped at zero.")
     o["wp_home_pre_v2"] = cube2.wp_home(o["inning"].values, o["bat_home"].values, o["outs"].values, o["bases_idx"].values, o["sd_home"].values, o["balls"].values, o["strikes"].values)
     wp2_S = cube2.wp_home(o["inning"].values, o["bat_home"].values, o["outs"].values, o["bases_idx"].values, o["sd_home"].values, o["balls"].values, o["strikes"].values + 1)
     wp2_B = cube2.wp_home(o["inning"].values, o["bat_home"].values, o["outs"].values, o["bases_idx"].values, o["sd_home"].values, o["balls"].values + 1, o["strikes"].values)
@@ -253,7 +262,7 @@ def main():
     band = ch["x_margin"].abs() >= 0.5
     rep.append(f"- Zone go/no-go: our any-part/midpoint classification agrees with the ABS verdict on {agree*100:.2f}% of {len(ch):,} challenged pitches "
                f"({(ch.loc[band,'truth']==ch.loc[band,'isOverturned']).mean()*100:.2f}% outside the ±0.5 in coin-flip band, n={int(band.sum()):,}); "
-               f"pre-registered threshold 90%.")
+               f"documented validation threshold 90%.")
     for edge in ("side", "top", "bottom"):
         s = ch[ch["edge"] == edge]
         rep.append(f"  - edge {edge}: n={len(s):,}, agreement {(s['truth']==s['isOverturned']).mean()*100:.2f}%")
@@ -265,9 +274,15 @@ def main():
             "outs", "on1", "on2", "on3", "bases_idx", "sd_home", "sd_team", "balls", "strikes", "batter", "pitcher", "stand", "p_throws", "pitch_type",
             "release_speed", "orig", "call_original", "call_final", "description", "team_home", "tokens", "tokens_opp", "tokens_home", "tokens_away",
             "x_mid", "z_mid", "plate_x", "plate_z", "szTop", "szBot", "height_in", "d_in", "d_in_center", "x_margin", "truth", "edge", "pa_ending",
-            "g", "g_v1", "wp_home_pre", "wp_home_pre_v2", "dwp_home_actual", "dwp_home_actual_v2", "home_win_exp", "delta_home_win_exp", "pos_pitcher", "pg_speed",
+            "g", "g_raw", "g_v1", "g_v1_raw", "wp_home_pre", "wp_home_pre_v2", "dwp_home_actual", "dwp_home_actual_v2", "home_win_exp", "delta_home_win_exp", "pos_pitcher", "pg_speed",
             "challenged", "isOverturned", "role", "challenger_id", "challenger_name", "challengeTeamId", "review_level", "hp_umpire", "startTime"]
     o = o[keep].sort_values(["game_date", "game_pk", "atBatIndex", "eventIndex"]).reset_index(drop=True)
+    if o.empty or not np.isfinite(o[["g", "d_in", "tokens"]].to_numpy()).all():
+        raise ValueError("Empty or non-finite opportunity table")
+    if agree < 0.90:
+        raise ValueError("Zone reconstruction failed the 90% verdict-agreement requirement")
+    if ((o["challenged"] == 1) & (o["tokens"] < 1)).any():
+        raise ValueError("An observed challenge has no token available")
     o.to_parquet(args.out, index=False)
     rep.append(f"- Output: {args.out} — {len(o):,} rows, {o['game_pk'].nunique():,} games; challenges {int(o['challenged'].sum()):,}.")
     with open(args.report, "w") as fh:

@@ -26,8 +26,9 @@ import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RETRO = os.path.join(HERE, "retro")
-OUT = os.path.join(HERE, "data")
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+RETRO = os.path.join(ROOT, "data", "raw", "retrosheet")
+OUT = os.path.join(ROOT, "data", "derived")
 os.makedirs(OUT, exist_ok=True)
 
 BALL_CODES = set("BIPV")

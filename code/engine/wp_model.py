@@ -24,7 +24,8 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(HERE, "data")
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+DATA = os.path.join(ROOT, "data", "derived")
 MODEL_PATH = os.path.join(DATA, "wp_hgb.joblib")
 CUBE_PATH = os.path.join(DATA, "wp_cube.npz")
 
@@ -58,7 +59,7 @@ def load_pitches(seasons=range(2015, 2026), cols=None):
     return pd.concat(parts, ignore_index=True)
 
 
-def fit_wp(seasons=range(2015, 2026), max_iter=400, save=True):
+def fit_wp(seasons=(2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024, 2025), max_iter=400, save=True):
     cols = ["season", "game_id", "inning", "bat_home", "outs", "on1", "on2", "on3", "score_diff_home", "balls",
             "strikes", "home_win"]
     df = load_pitches(seasons, cols)
@@ -152,6 +153,7 @@ class WPCube:
             walk = balls + 1 >= 4
             nb_idx, nsd = self.walk_state(bases_idx, sd, bat_home)
             wp_walk = self.wp_home(inning, bat_home, outs, nb_idx, nsd, 0, 0)
+            wp_walk = np.where((inning >= 9) & (bat_home == 1) & (nsd > 0), 1.0, wp_walk)
             wp_ball = self.wp_home(inning, bat_home, outs, bases_idx, sd, np.minimum(balls + 1, 3), strikes)
             return np.where(walk, wp_walk, wp_ball)
         else:

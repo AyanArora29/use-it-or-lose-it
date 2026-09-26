@@ -21,15 +21,15 @@ def main():
     n_tg = op.groupby(["game_id", "team_home"]).ngroups
     op["inn_band"] = np.where(op["inning"] <= 3, "1-3", np.where(op["inning"] <= 6, "4-6", np.where(op["inning"] <= 8, "7-8", "9+")))
     op["cnt"] = np.where((op["balls"] == 3) | (op["strikes"] == 2), "PA-ending", "count-changing")
-    op["obs_gain"] = op["g"] * op["challenged"] * op["overturned"]
+    op["obs_gain"] = op["g"] * op["challenged"] * op["truth"]
     op["opt_gain"] = op["g"] * op["prop_optimal"] * op["truth"]
     op["obs_used"] = op["challenged"]; op["opt_used"] = op["prop_optimal"]
-    op["obs_succ"] = op["challenged"] * op["overturned"]; op["opt_succ"] = op["prop_optimal"] * op["truth"]
+    op["obs_succ"] = op["challenged"] * op["truth"]; op["opt_succ"] = op["prop_optimal"] * op["truth"]
     op["oracle_gain"] = op["g"] * op["truth"]
     rep = ["# Shortfall decomposition — 2026 (observed vs information-constrained optimum)", "",
            "Levels per team-game. The optimum is one global policy evaluated on the same streams; a negative per-band gap means the optimum spends fewer tokens there because it spent them earlier, not that teams out-perform it there.", ""]
     rep.append(f"- Per team-game: observed {op['obs_gain'].sum()/n_tg*100:.3f} pp; optimum {op['opt_gain'].sum()/n_tg*100:.3f} pp; oracle {op['oracle_gain'].sum()/n_tg*100:.3f} pp; "
-               f"gap {(op['opt_gain'].sum()-op['obs_gain'].sum())/n_tg*100:.3f} pp ({(op['opt_gain'].sum()-op['obs_gain'].sum())/n_tg*162:.2f} wins/162).")
+               f"gap {(op['opt_gain'].sum()-op['obs_gain'].sum())/n_tg*100:.3f} pp (fixed-stream model).")
     rows = []
     for keys, name in (["role"], "side"), (["inn_band"], "inning band"), (["role", "inn_band"], "side × inning band"), (["cnt"], "count class"), (["role", "cnt"], "side × count class"), (["tokens_obs"], "tokens in hand (observed)"):
         t = op.groupby(keys).agg(opps=("g", "size"), obs_used=("obs_used", "sum"), opt_used=("opt_used", "sum"), obs_succ=("obs_succ", "sum"), opt_succ=("opt_succ", "sum"),

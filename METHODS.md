@@ -1,3 +1,5 @@
+> **September 26 audit status:** This dated plan is retained as history. See [CURRENT_METHODS.md](CURRENT_METHODS.md) for implemented methods, post-data corrections, and unresolved validation gaps. Claims below about preregistration, formal upper bounds, multiplicity control, and completed Tier-2 work are not established by the current audit.
+
 # METHODS.md — Pre-registered analysis plan (v0.3c, 2026-08-18)
 
 *Project: "Use It or Lose It" — the value, optimal use, and behavioral consequences of MLB's 2026 ABS challenge system.*

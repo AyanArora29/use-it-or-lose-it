@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "code"))
 from abs_zone import propagate_to_midpoint, signed_miss_inches, BALL_RADIUS  # noqa: E402
 from wp_model import WPCube  # noqa: E402
 
-ROOT = os.environ.get("ABS_ROOT") or os.path.dirname(HERE)          # sloan/  (raw data staged under data/raw)
+ROOT = os.environ.get("ABS_ROOT") or os.path.abspath(os.path.join(HERE, "..", ".."))
 RAW = os.path.join(ROOT, "data", "raw")
 DER = os.path.join(ROOT, "data", "derived")
 os.makedirs(DER, exist_ok=True)
@@ -46,6 +46,8 @@ def load_heights(season):
 
 
 def prep_season(season, cube: WPCube):
+    if season >= 2026:
+        raise ValueError("Challenge-era Statcast contains final calls. Use challenges_extract.py and build_opps_2026.py to recover original calls.")
     src = os.path.join(RAW, "statcast", f"statcast_{season}.parquet")
     df = pd.read_parquet(src)
     n0 = len(df)

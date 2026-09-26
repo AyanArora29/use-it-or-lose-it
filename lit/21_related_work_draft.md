@@ -1,3 +1,5 @@
+> **Historical draft — September 26 audit:** Some claims below are superseded. Use the current methods and audit briefing before reusing claims about season wins, identified eyesight, novelty, eight-cell cards, or completed umpire/framing studies.
+
 # 21 — Related Work (draft for the paper)
 
 *Target 1,200–1,600 words; inline (Author Year) citations; register modeled on recent SSAC winners (institutional fact → gap → themed paragraphs with pointed differentiation → numbered novelty list). Bracketed items are placeholders to fill from our data.*

@@ -267,6 +267,8 @@ def main():
         print("  ", e)
     tot = sum(r["challenge_mentions"] for r in rows)
     print(f"Total 'challenge' mentions across feeds: {tot} (if this is ~0 for 2026, tell me — challenges live elsewhere)")
+    if errs or not rows:
+        raise SystemExit(f"Incomplete feed pull: {len(errs)} errors, {len(rows)} games saved")
 
 
 if __name__ == "__main__":

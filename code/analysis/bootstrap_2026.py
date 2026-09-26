@@ -1,5 +1,6 @@
 """
-bootstrap_2026.py — game-clustered bootstrap of the full Tier-1 pipeline (METHODS §11): resample games with replacement,
+bootstrap_2026.py — game-clustered bootstrap with the WP cube, geometry and leverage cut points held fixed:
+resample games with replacement,
 refit the perception model (σ_side, τ_cell), rebuild p(m), redraw ε, re-solve the DP (numba), re-simulate the
 information-constrained optimum and recompute the observed realized value, capture ratio, V(2), MTV, and card cells.
 
@@ -54,7 +55,8 @@ def card_from(op_sorted, C, gq):
     m2 = C[hc, d, outs, 2] - C[hc, d, outs, 1]; m1 = C[hc, d, outs, 1] - C[hc, d, outs, 0]
     g = o["g"].values
     ok = g > 0
-    p2 = np.where(ok, m2 / (g + m2), np.nan); p1 = np.where(ok, m1 / (g + m1), np.nan)
+    p2 = np.divide(m2, g + m2, out=np.ones_like(g), where=ok)
+    p1 = np.divide(m1, g + m1, out=np.ones_like(g), where=ok)
     lev = np.where(g < gq[0], "low", np.where(g < gq[1], "mid", "high"))
     df = pd.DataFrame({"inn_band": INN_BAND(o["inning"].values), "cnt": CNT_CLASS(o["balls"].values, o["strikes"].values),
                        "lev": lev, "p2": p2, "p1": p1})
@@ -68,6 +70,8 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default=os.path.join(DERIVED, "bootstrap_2026.csv"))
     ap.add_argument("--full-only", action="store_true", help="only run the point estimate (replicate 0)")
+    ap.add_argument("--start", type=int, default=0, help="first replicate, inclusive; independent seeds permit parallel shards")
+    ap.add_argument("--stop", type=int, default=None, help="last replicate, inclusive")
     args = ap.parse_args()
     t_start = time.time()
     o = pd.read_parquet(os.path.join(DERIVED, "opps_2026.parquet"))
@@ -81,10 +85,13 @@ def main():
     games = np.array(sorted(o["game_pk"].unique()))
     o_by_game = {g: v for g, v in o.groupby("game_pk", sort=False)}
     hi_by_game = {g: v for g, v in hi_all.groupby("game_id", sort=False)}
-    rng = np.random.default_rng(args.seed)
     rows = []
     B = 0 if args.full_only else args.B
-    for b in range(0, B + 1):
+    stop = B if args.stop is None else min(B, args.stop)
+    if args.start < 0 or args.start > stop:
+        raise ValueError("invalid bootstrap replicate range")
+    for b in range(args.start, stop + 1):
+        rng = np.random.default_rng(np.random.SeedSequence([args.seed, b]))
         t0 = time.time()
         if b == 0:
             sample = games
@@ -114,7 +121,7 @@ def main():
         os_ = A["op_sorted"]
         r_opt, _ = F.simulate_fast(os_, C, pm, "optimal", D=args.draws, seed=1000 + b)
         r_orc, _ = F.simulate_fast(os_, C, pm, "oracle", D=1, seed=1)
-        obs_gain = (os_["g"] * os_["challenged"] * os_["overturned"]).sum() / (os_.groupby(["game_id", "team_home"]).ngroups)
+        obs_gain = (os_["g"] * os_["challenged"] * os_["truth"]).sum() / (os_.groupby(["game_id", "team_home"]).ngroups)
         opt_gain = r_opt["gain"].mean(); orc_gain = r_orc["gain"].mean()
         card = card_from(os_, C, gq)
         row = dict(b=b, n_games=len(sample), sigma_bat=pm["bat"][2], sigma_fld=pm["fld"][2],
@@ -122,7 +129,7 @@ def main():
                    MTV2_inn5=V[9, DMAX, 2] - V[9, DMAX, 1], MTV2_inn9=V[17, DMAX, 2] - V[17, DMAX, 1],
                    MTV1_inn9=V[17, DMAX, 1] - V[17, DMAX, 0],
                    obs_gain=obs_gain, opt_gain=opt_gain, oracle_gain=orc_gain, capture=obs_gain / opt_gain,
-                   perception_cost=opt_gain / orc_gain, gap_wins162=(opt_gain - obs_gain) * 162,
+                   perception_cost=opt_gain / orc_gain, gap_wp=(opt_gain - obs_gain),
                    opt_used=r_opt["used"].mean(), opt_succ_rate=r_opt["succ"].sum() / max(r_opt["used"].sum(), 1e-9))
         for (ib, lev, cnt), rr in card.iterrows():
             row[f"card2_{ib}_{lev}_{cnt}"] = rr["p2"]; row[f"card1_{ib}_{lev}_{cnt}"] = rr["p1"]
@@ -131,20 +138,20 @@ def main():
               f"σ=({pm['bat'][2]:.2f},{pm['fld'][2]:.2f}) [{time.time()-t0:.0f}s, total {time.time()-t_start:.0f}s]", flush=True)
         pd.DataFrame(rows).to_csv(args.out, index=False)
     df = pd.DataFrame(rows)
-    if len(df) > 1:
+    if len(df) > 1 and (df["b"] == 0).any() and args.start == 0 and stop == B:
         print(summarize(df, os.path.join(DERIVED, "tier1_bootstrap_2026.md")))
 
 
 def summarize(df, out_md=None):
     """Percentile intervals from a bootstrap CSV/DataFrame (row b=0 is the full-sample point estimate)."""
     boot = df[df["b"] > 0]
-    lines = [f"# Game-clustered bootstrap — {len(boot)} replicates (full pipeline: perception refit, DP re-solve, policy re-simulation)", ""]
+    lines = [f"# Game-clustered bootstrap — {len(boot)} replicates (perception refit, DP re-solve, policy re-simulation; WP cube and geometry held fixed)", ""]
     lines.append("| quantity | point estimate | 95% percentile interval | bootstrap SE |")
     lines.append("|---|---|---|---|")
     names = {"capture": "capture ratio (observed ÷ optimum)", "V2_start": "value of two challenges at first pitch, tie (WP)", "MTV2_inn1": "MTV of 2nd token, inning 1 (WP)",
              "MTV1_inn1": "MTV of 1st token, inning 1 (WP)", "MTV2_inn9": "MTV of 2nd token, inning 9 (WP)", "MTV1_inn9": "MTV of 1st token, inning 9 (WP)",
              "obs_gain": "observed realized gain per team-game (WP)", "opt_gain": "information-constrained optimum (WP)", "oracle_gain": "oracle (WP)",
-             "perception_cost": "optimum ÷ oracle", "gap_wins162": "gap in wins per 162", "sigma_bat": "σ batters (in)", "sigma_fld": "σ fielding (in)",
+             "perception_cost": "optimum ÷ oracle", "gap_wp": "gap in modeled reversal WP per team-game", "sigma_bat": "σ batters (in)", "sigma_fld": "σ fielding (in)",
              "opt_used": "optimal challenges per team-game", "opt_succ_rate": "optimal success rate"}
     for c, nm in names.items():
         if c not in df:

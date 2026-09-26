@@ -30,7 +30,8 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-DATA = os.path.join(HERE, "data")
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+DATA = os.path.join(ROOT, "data", "derived")
 CUBE_PATH = os.path.join(DATA, "wp_count_cube.npz")
 BASE_PATH = os.path.join(DATA, "wp_base_hgb.joblib")
 

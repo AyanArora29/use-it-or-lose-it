@@ -40,7 +40,7 @@ def main():
     n_games = os_["game_id"].nunique()
     rows = []
     obs_used = os_["challenged"].sum() / n_games; obs_ov = (os_["challenged"] * os_["overturned"]).sum() / n_games
-    obs_gain = (os_["g"] * os_["challenged"] * os_["overturned"]).sum() / n_tg
+    obs_gain = (os_["g"] * os_["challenged"] * os_["truth"]).sum() / n_tg
     rows.append(dict(rule="2026 as played (observed behaviour)", tokens=2, retain=True, grant=True, value_pp=obs_gain * 100,
                      challenges_per_game=obs_used, corrected_per_game=obs_ov, failed_per_game=obs_used - obs_ov,
                      minutes_added=obs_used * SEC_PER_CHALLENGE / 60, corrections_per_minute=obs_ov / (obs_used * SEC_PER_CHALLENGE / 60)))

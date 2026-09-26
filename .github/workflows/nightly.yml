@@ -1,7 +1,7 @@
 name: nightly-rebuild
 # Pulls fresh public data (Statcast current season, StatsAPI feeds, Savant leaderboards, heights), runs the tests,
-# rebuilds derived tables/figures when the analysis pipeline is wired, and publishes whatever data assets exist to a
-# rolling GitHub Release. Every pull is tolerant: one blocked source never sinks the run.
+# rebuilds derived tables/figures and publishes only after every required analysis succeeds.
+# Optional historical pulls are tolerant; missing current inputs or failed analyses fail the job.
 on:
   schedule:
     - cron: "0 9 * * *"     # 09:00 UTC daily
@@ -35,11 +35,11 @@ jobs:
           done
           ls -la data/raw/statcast || true
 
-      - name: Pull Statcast current season (tolerant — Savant may refuse datacenter IPs)
-        run: python code/fetch/01_fetch_statcast.py --seasons 2026 --force || echo "::warning::Statcast pull failed on this runner"
+      - name: Pull Statcast current season
+        run: python code/fetch/01_fetch_statcast.py --seasons 2026 --force
 
       - name: Pull StatsAPI feeds (current season)
-        run: python code/fetch/02_fetch_statsapi_feeds.py --season 2026 || echo "::warning::feeds pull failed"
+        run: python code/fetch/02_fetch_statsapi_feeds.py --season 2026
 
       - name: Pull Savant leaderboards + heights/transactions
         run: |
@@ -49,6 +49,7 @@ jobs:
       - name: Tests
         run: |
           python code/engine/abs_zone.py
+          python -m pytest tests -q
           python code/engine/test_dp.py
           python code/engine/perception.py
 
@@ -56,14 +57,14 @@ jobs:
         run: |
           if [ -d data/raw/feeds/2026 ] && [ "$(ls data/raw/feeds/2026 | wc -l)" -gt 0 ]; then
             mkdir -p data/derived
-            python code/engine/challenges_extract.py --feeds data/raw/feeds/2026 --out data/derived/feed_2026 || echo "::warning::challenge extraction failed"
+            python code/engine/challenges_extract.py --feeds data/raw/feeds/2026 --out data/derived/feed_2026
           else
             echo "no feeds on this runner"
           fi
 
       - name: Build derived tables and figures (opportunity table -> perception fits -> DP / policies -> robustness, counterfactuals, figures)
-        env: { BOOTSTRAP_B: "100" }
-        run: python code/analysis/build_all.py || echo "::warning::analysis pipeline reported a failure"
+        env: { BOOTSTRAP_B: "200" }
+        run: python code/analysis/build_all.py
 
       - name: Publish data assets to the rolling 'data' release (only what exists)
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -76,7 +77,7 @@ jobs:
           fi
           if [ -d data/raw/savant ]; then tar czf savant_leaderboards.tgz -C data/raw savant && upload savant_leaderboards.tgz; fi
           if [ -d data/raw/players ]; then tar czf players_transactions.tgz -C data/raw players transactions 2>/dev/null && upload players_transactions.tgz; fi
-          for f in data/derived/*.parquet data/derived/*.csv data/derived/*.md data/derived/*.json data/derived/*.npy; do [ -s "$f" ] && upload "$f"; done
+          for f in data/derived/*.parquet data/derived/*.csv data/derived/*.md data/derived/*.json data/derived/*.npy data/derived/*.npz; do [ -s "$f" ] && upload "$f"; done
           echo "done"
 
       - name: Run summary

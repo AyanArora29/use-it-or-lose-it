@@ -5,7 +5,8 @@ Rule (MLB press release, Sept 2025): the ABS zone is a two-dimensional rectangle
 home plate, 17 inches wide, with top = 53.5% and bottom = 27% of the batter's height; a pitch is a
 strike if ANY PART of the ball touches the rectangle.
 
-Statcast reports plate_x / plate_z at the FRONT of home plate (y = 17/12 ft from the plate's back point).
+Before 2026 Statcast reports plate_x / plate_z at the FRONT of home plate. From 2026 they are at mid-plate;
+do not propagate those coordinates again. StatsAPI front-plane coordinates still need propagation.
 The plate's midpoint is 8.5 inches behind the front edge (y = 8.5/12 ft). We propagate the tracked
 trajectory from the front to the midpoint using the public constant-acceleration fields
 (vx0, vy0, vz0, ax, ay, az, all defined at y0 = 50 ft).
@@ -54,8 +55,8 @@ def propagate_to_midpoint(plate_x, plate_z, vx0, vy0, vz0, ax, ay, az):
 
 
 def abs_zone_bounds(height_in):
-    """Zone rectangle (ft) for a batter of given height in inches: (x_lo, x_hi, z_lo, z_hi) — ball CENTER
-    coordinates, i.e. already expanded by the ball radius per the 'any part of the ball' rule."""
+    """Bounding box of the ball-center strike region (ft). Its corners are ROUNDED, not square.
+    Use signed_miss_inches for classification; being inside this bounding box is not sufficient."""
     h = np.asarray(height_in, float) / 12.0
     x_lo = -(PLATE_HALF_WIDTH + BALL_RADIUS)
     x_hi = +(PLATE_HALF_WIDTH + BALL_RADIUS)
@@ -64,20 +65,28 @@ def abs_zone_bounds(height_in):
     return x_lo, x_hi, z_lo, z_hi
 
 
-def signed_miss_inches(x, z, height_in, expand_ball=True):
-    """Signed distance (inches) from the ball CENTER to the ABS rectangle (expanded by ball radius if
-    expand_ball). Negative = inside the zone (a true strike), positive = outside (a true ball).
-    Uses the Euclidean distance to the rectangle outside, and minus the inset depth inside."""
+def signed_miss_from_bounds(x, z, z_lo, z_hi, expand_ball=True):
+    """Signed ball-edge clearance from the physical rectangle, in inches.
+
+    A circular ball intersects a rectangle iff its center is at most one radius from it.
+    Subtract the radius AFTER computing the rectangle's signed Euclidean distance. Expanding
+    each edge first would incorrectly count balls beyond the corners as strikes.
+    """
     x, z = np.asarray(x, float), np.asarray(z, float)
-    x_lo, x_hi, z_lo, z_hi = abs_zone_bounds(height_in)
-    if not expand_ball:
-        x_lo, x_hi, z_lo, z_hi = x_lo + BALL_RADIUS, x_hi - BALL_RADIUS, z_lo + BALL_RADIUS, z_hi - BALL_RADIUS
+    z_lo, z_hi = np.asarray(z_lo, float), np.asarray(z_hi, float)
+    x_lo, x_hi = -PLATE_HALF_WIDTH, PLATE_HALF_WIDTH
     dx = np.maximum(np.maximum(x_lo - x, x - x_hi), 0.0)
     dz = np.maximum(np.maximum(z_lo - z, z - z_hi), 0.0)
     outside = np.sqrt(dx * dx + dz * dz)
     inside = np.minimum(np.minimum(x - x_lo, x_hi - x), np.minimum(z - z_lo, z_hi - z))
     d = np.where(outside > 0, outside, -inside)
-    return d * 12.0
+    return (d - (BALL_RADIUS if expand_ball else 0.0)) * 12.0
+
+
+def signed_miss_inches(x, z, height_in, expand_ball=True):
+    """Signed clearance (inches); nonpositive means the ball touches the strike rectangle."""
+    h = np.asarray(height_in, float) / 12.0
+    return signed_miss_from_bounds(x, z, BOT_FRAC * h, TOP_FRAC * h, expand_ball)
 
 
 def abs_is_strike(x, z, height_in):

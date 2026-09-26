@@ -25,7 +25,7 @@ def main():
     o = pd.read_parquet(os.path.join(DERIVED, "opps_2026.parquet"), columns=["game_pk", "atBatIndex", "eventIndex", "home_team", "away_team", "game_date"])
     op = op.merge(o.rename(columns={"game_pk": "game_id", "atBatIndex": "abi", "eventIndex": "evi"}), on=["game_id", "abi", "evi"], how="left")
     op["team"] = np.where(op["team_home"] == 1, op["home_team"], op["away_team"])
-    op["obs_gain"] = op["g"] * op["challenged"] * op["overturned"]
+    op["obs_gain"] = op["g"] * op["challenged"] * op["truth"]
     op["opt_gain"] = op["g"] * op["prop_optimal"] * op["truth"]
     rep = ["# Teams and learning — 2026", ""]
     # ---- team table -----------------------------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def main():
     t["capture_shrunk"] = (t["opt"] + t["diff_shrunk"]) / t["opt"]
     t = t.sort_values("capture_shrunk", ascending=False)
     rep.append(f"- Between-team SD of the raw capture ratio: {t['capture_raw'].std():.3f}; after empirical-Bayes shrinkage: {t['capture_shrunk'].std():.3f} "
-               f"(pre-registered threshold for 'material heterogeneity': 0.10). Reliability (between / (between + mean within) variance of obs−opt): {between_var/(between_var+np.mean(within_var)):.2f}.")
+               f"(threshold in the dated plan for 'material heterogeneity': 0.10; exploratory). Reliability (between / (between + mean within) variance of obs−opt): {between_var/(between_var+np.mean(within_var)):.2f}.")
     rep.append("- Teams (per team-game WP points; capture = observed ÷ optimal for that team's own streams):\n\n" +
                t[["team", "games", "used", "succ_rate", "obs", "opt", "capture_raw", "capture_shrunk"]].assign(obs=lambda d: d["obs"] * 100, opt=lambda d: d["opt"] * 100).round(3).to_string(index=False) + "\n")
     # ---- learning: thresholds by month, by side --------------------------------------------------------------------

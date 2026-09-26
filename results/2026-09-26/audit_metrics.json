@@ -1,0 +1,22 @@
+{
+  "games": 2398,
+  "opportunities": 350588,
+  "eligible_challenges": 10425,
+  "date_start": "2026-03-25",
+  "date_end": "2026-09-25",
+  "verdict_agreement": 0.9997122302158273,
+  "disagreements": 3,
+  "negative_raw_gain_count": 7434,
+  "signed_observed_pp": 2.107907493688154,
+  "clipped_observed_pp": 2.109993100820753,
+  "optimal_pp": 2.565298170970635,
+  "oracle_pp": 6.368026892262075,
+  "capture": 0.8225137821005785,
+  "card_gap_recovery": 0.5881801812452143,
+  "dual_solver_games": 104,
+  "dual_solver_max_V_diff": 2.7755575615628914e-17,
+  "dual_solver_max_C_diff": 5.204170427930421e-17,
+  "full_sample_fixed_point_residual": 0.00013574037807430545,
+  "monotonicity_min_C_increment": 0.0,
+  "card_thresholds": 48
+}

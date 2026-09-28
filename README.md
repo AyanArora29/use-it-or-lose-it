@@ -2,6 +2,10 @@
 
 Research for the MIT Sloan Sports Analytics Conference 2027 Baseball track. This repository evaluates when teams should spend retained-on-success challenges under an explicit model of the information available to players.
 
+## September 28 full-season snapshot
+
+On 354,488 eligible called pitches and 10,545 challenges from 2,425 games covering the complete 2026 regular season (March 25 to September 27; 2,429 games played, four without ABS), observed challenges capture **82.2%** of an approximate model benchmark. A 200-replicate game-clustered refit bootstrap gives a **79.9%–84.9%** conditional interval. The benchmark produces 2.557 percentage points of cumulative reversal value per team-game, observed use 2.102, and the 48-threshold card 2.376. The card recovers 60.3% of the modeled gap in simulation. Reconstructed outcomes agree with recorded verdicts on 99.97% of challenged pitches. The tables in `results/2026-09-28/` are copied verbatim from the nightly workflow's rolling `data` release (run completed 2026-09-28 18:13 UTC on commit cf4ae86); the folder's manifest records the run's source and input hashes. The September 25 snapshot below is retained as the audited reference; every headline moved by less than 0.1 percentage points of value or 1.5 points of ratio.
+
 ## September 26 audit revision
 
 On 350,588 eligible called pitches and 10,425 challenges from 2,398 games through September 25, observed challenges capture **82.3%** of an approximate model benchmark. A 200-replicate game-clustered refit bootstrap gives a **79.4%–84.8%** conditional interval. The benchmark produces 2.565 percentage points of cumulative reversal value per team-game, observed use 2.110, and the 48-threshold card 2.378. The card recovers 58.8% of the modeled gap in simulation.
@@ -20,6 +24,7 @@ The audit corrected round-ball corner geometry, aligned count classifications an
 - `tests/`: regression tests for geometry, terminal states, extra innings, inventory-dependent decisions, scoring and estimator recovery.
 - `data/derived/wp_count_cube.npz`, `wp_cube.npz`: versioned historical WP cubes used by the analysis.
 - `results/2026-09-26/`: compact corrected result tables and audit records prepared locally; see their manifest.
+- `results/2026-09-28/`: full-season result tables copied from the rolling release; see `manifest.json` and `metrics.json`.
 - `tutorials/`: introductory examples; these are not independent validation of the full empirical study.
 - `.github/workflows/nightly.yml`: current-data rebuild and rolling-release workflow.
 

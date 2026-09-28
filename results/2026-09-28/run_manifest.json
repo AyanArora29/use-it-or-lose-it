@@ -1,0 +1,41 @@
+{
+  "started_utc": "2026-09-28T17:30:42.119265+00:00",
+  "completed_utc": "2026-09-28T18:13:52.432719+00:00",
+  "bootstrap_replicates": 200,
+  "source_sha256": {
+    "code/fetch/04_fetch_players_and_transactions.py": "a0912e0d52390540088e0df29c6f758009370f0bef24aa65fc28da0d1124830b",
+    "code/fetch/02_fetch_statsapi_feeds.py": "c8f3b1e121973f78e2088e0ea7c4f2fc0518b8d4db0d984f37a181e2c03121e4",
+    "code/fetch/01_fetch_statcast.py": "4a256b5f96d145075a1063338b9a3eccbffb7247b48a39da5aa20be72ac836e7",
+    "code/fetch/03_fetch_savant_leaderboards.py": "fd23dfc694363339639dfaa0943c20c6db3cad5852dffa1bf66d0bb601623d91",
+    "code/engine/dp.py": "d23023c018f1d3227003d4303a7a78149628564bd263b77ce37347990f7e7c0b",
+    "code/engine/challenges_extract.py": "6faeac942ba22f8aee584ee98aa905ebd80dca3f2a593021a54c282232232502",
+    "code/engine/wp_model.py": "99c62992844443c362dbc894f281ba69703d6313f6e62fb9c621a72197e295ce",
+    "code/engine/retro_parse.py": "1c5b1aed92377ea8879de7d8663a8768ec7c2164593efedfd0736440557d4f0a",
+    "code/engine/dp_fast.py": "8bc27a64446744b1ffbca49e50840d9cd4944f6955fb2a5ceabcaf5fcccd9eb0",
+    "code/engine/wp_count.py": "fa1474be8a0b74dd6e83a5cf4a5ce170d93e38b6b2a91b473b3cbf4225625f13",
+    "code/engine/perception.py": "9329448d9688559b3e797340abc7e7f3b74f8538f095e64c58034a7a0b3d797a",
+    "code/engine/statcast_prep.py": "946f05ac387ca99fb20ff7ae59dcf7ae21f6c8915a634ef7ddfb5da6c141f5ca",
+    "code/engine/abs_zone.py": "d138f2ec0d46a42f9a0f9c89fbe77a28e42e33ba3fc256d1bd657e528ae7a547",
+    "code/engine/decision_state.py": "0cc2d4b63b6d2c5e68286426dc2fe9c81e163ec98a5286b13c950644e3ba408b",
+    "code/engine/feed_extract.py": "ed29e0def3e87cb792e96078a1eca41d1d9a8fc2ebb077a56cb6c31120541b0a",
+    "code/engine/test_dp.py": "cdad734e225e2998d012e1eebe002d559c1815bd3bece5a5843f0feb67e28f32",
+    "code/analysis/robustness_2026.py": "86ba364a01f558d770f183b4a9b9256be0fa1add7075fb67c2d13ba6bb68600f",
+    "code/analysis/build_all.py": "e5d5c44fe08a8c11bba3dc77aaeafb2952938e5cf5775cd314695f72d2efae2e",
+    "code/analysis/perception_extra_2026.py": "5a371cf97df57800b948481827ccdeb44ff81110ad6ac4d96718ee9abe4249ab",
+    "code/analysis/tier1_dp_2026.py": "957d09427d9468d02364a08dbd4f21eed2d22a22be75bfec65622ea1492cbac1",
+    "code/analysis/bootstrap_2026.py": "c4134e138a78c581d726e28e21270062aaff90e27b4573ee5ad9b27d3a279978",
+    "code/analysis/perception_fit_2026.py": "a3c834391cab39b9a61f64d64771842a41cb898d91b8eeb7e60b795c52384094",
+    "code/analysis/build_opps_2026.py": "78923e123c6a7f7cd585966abc30e7bee42e23296c68b3140a1e277ebef3302a",
+    "code/analysis/teams_learning_2026.py": "33503d82bc31e260e96b71354cddfbc693db60a6e48a916977dd93ab74265347",
+    "code/analysis/decompose_2026.py": "2078a59acf07c7384faf07d1ce82f57c93caf3f688b5ae707b9be38abcceaf36",
+    "code/analysis/figures_2026.py": "e18efd3b8cece8f29106667819d43ebbabe806db39d1508b51bbc44288d7f5b7",
+    "code/analysis/counterfactuals_2026.py": "562c2149dfcaf231da7aca1273bcb422a0098fbb02b291445f328ef48dc17dbb"
+  },
+  "input_sha256": {
+    "data/derived/feed_2026_pitches.parquet": "d4377fdcd61c0433e9c7aebd3ce95ec2e91293bf5e13b698121ab66796a72796",
+    "data/derived/feed_2026_games.csv": "e55a3ee80fe68ee1634188f63bfa774f9a9b68603ed5953dfafaee072fc4b93e",
+    "data/raw/statcast/statcast_2026.parquet": "09b95ed8ad2e51709e2032fbd6a2425aa3a8c06be13187a4441ed177730f87e9",
+    "data/derived/wp_count_cube.npz": "a1a95c8b00b5fcb0434c89805be4ac92f2fa51f8af62c6a28163a28d130f8502",
+    "data/derived/wp_cube.npz": "59c426a59b66ef89c1714b4f92bf1772020c10e707e5934c050ecd310f86e5f0"
+  }
+}

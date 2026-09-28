@@ -1,0 +1,59 @@
+{
+ "source": "rolling `data` release published by .github/workflows/nightly.yml on GitHub's runner (workflow_dispatch run on commit cf4ae86), copied verbatim; nothing recomputed locally except this summary",
+ "run_started_utc": "2026-09-28T17:30:42.119265+00:00",
+ "run_completed_utc": "2026-09-28T18:13:52.432719+00:00",
+ "bootstrap_replicates": 200,
+ "date_start": "2026-03-25",
+ "date_end": "2026-09-27",
+ "season_games_played": 2429,
+ "games_without_abs": 4,
+ "games": 2425,
+ "opportunities": 354488,
+ "opportunities_incl_position_player_pitching": 355555,
+ "eligible_challenges": 10545,
+ "challenges_parsed": 10558,
+ "overturned": 5681,
+ "overturn_rate": 0.5387,
+ "verdict_agreement": 0.9997,
+ "verdict_agreement_note": "99.97% of 10,545 challenged pitches (verification_2026.md)",
+ "signed_observed_pp": 2.102244,
+ "clipped_observed_pp": 2.102334,
+ "optimal_pp": 2.556794,
+ "card_pp": 2.37635,
+ "oracle_pp": 6.355541,
+ "capture": 0.822254,
+ "capture_results_json": 0.8222185787304649,
+ "capture_ci95_results_json": [
+  0.7915690475846521,
+  0.8482655545279308
+ ],
+ "capture_refit_bootstrap_point": 0.8219,
+ "capture_refit_bootstrap_ci95": [
+  0.7986,
+  0.8494
+ ],
+ "card_gap_recovery": 0.602949,
+ "oracle_over_optimal": 2.4857,
+ "sigma_batters_in": 3.041105762820918,
+ "sigma_fielding_in": 1.877822268160753,
+ "counterfactual_3_retained_pp": 3.1629346527350157,
+ "counterfactual_2_not_retained_pp": 1.9540861754948855,
+ "solver": {
+  "solver": "numba",
+  "iterations": 60,
+  "last_update": 0.00012999655896518865,
+  "tolerance": 1e-07,
+  "converged": false
+ },
+ "max_gain_overturned_challenge": {
+  "game_pk": 824614,
+  "inning": 9,
+  "outs": 1,
+  "count": "3-2",
+  "bases_loaded": true,
+  "tie": true,
+  "side": "fielding",
+  "gain_wp": 0.385927
+ },
+ "card_thresholds": 48
+}

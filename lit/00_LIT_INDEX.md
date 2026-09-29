@@ -14,7 +14,6 @@ Domain notes (full-text reads, each with must-cites, traps, open questions, data
 - 11_related_work_prior_finalists.md — abstracts/first paragraphs/contributions/limitations of 12 prior finalists; abstract template; style rules.
 Synthesis:
 - 20_annotated_bibliography.md — ~110 works, 27 ★ must-cites.
-- 21_related_work_draft.md — 1,450-word Related Work draft with a 7-item novelty list.
 - 22_claims_and_traps.md — 20 claims to hedge, ~50 quotable facts, 12 referee objections with responses.
 - 23_cross_sport_review_rights.md — 11-system comparison table; why MLB is the best laboratory.
 - 24_data_sources.md — every public data source found.

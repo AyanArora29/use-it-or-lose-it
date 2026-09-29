@@ -39,8 +39,6 @@
     "tier1_bootstrap_2026.md": "d2ff158ead9c4441b014b179f348058a55ae20f0b74a9f6188fa81a8171a0597",
     "tier1_decomposition_2026.csv": "b04fdf944fd7f9efb101c91f0b2ecf46ee75257b652b59a29fe9f2fd99aa8a55",
     "bootstrap_2026.csv": "ef6efb83a994622d0362d800008273b50cab45baa8df62fbde47e3d0149ce2ad",
-    "AUDIT.md": "85ca8f300d7fceabea5c3b9460a7798364c79a1fd1b52e0935d560065a47b0a2",
-    "ABSTRACT.md": "c33d49c0703506ef447075a2ab420194d77c47c8f9b14aa4e47456c8cc55f3de",
     "tier1_mtv_2026.csv": "56b93249f5a3bff932a43108d55a7d3ef597934d32a920378c94fdabfdac701e",
     "solver_cycle_phases_2026.csv": "fe178d9123742576aa1a3a07e8ba78c5bf60034acd3e0be55220774282edbeca",
     "tier1_policies_2026.csv": "a263dd5066c1ff8b940edad8cd1fab33241a925ec5ee53caeb061e5253533157",
@@ -59,5 +57,6 @@
     "Independent 200-pitch manual audit pending",
     "Approximate policy iteration has a measured two-cycle",
     "Statistical interval does not cover all specification uncertainty"
-  ]
+  ],
+  "note_2026-09-29": "ABSTRACT.md and AUDIT.md (draft documents) removed from the snapshot; result tables unchanged."
 }

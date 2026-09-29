@@ -23,7 +23,7 @@ The audit corrected round-ball corner geometry, aligned count classifications an
 - `code/analysis/`: opportunity building, propensity fitting, policy evaluation, bootstrap and sensitivity analyses.
 - `tests/`: regression tests for geometry, terminal states, extra innings, inventory-dependent decisions, scoring and estimator recovery.
 - `data/derived/wp_count_cube.npz`, `wp_cube.npz`: versioned historical WP cubes used by the analysis.
-- `results/2026-09-26/`: compact corrected result tables and audit records prepared locally; see their manifest.
+- `results/2026-09-26/`: compact corrected result tables and audit metrics prepared locally; see their manifest.
 - `results/2026-09-28/`: full-season result tables copied from the rolling release; see `manifest.json` and `metrics.json`.
 - `tutorials/`: introductory examples; these are not independent validation of the full empirical study.
 - `.github/workflows/nightly.yml`: current-data rebuild and rolling-release workflow.
